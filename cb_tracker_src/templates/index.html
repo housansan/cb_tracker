@@ -1,0 +1,252 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>可转债历史数据查询</title>
+  <script src="https://cdn.jsdelivr.net/npm/echarts@5.4.3/dist/echarts.min.js"></script>
+  <link rel="stylesheet" href="/static/css/main.css" />
+</head>
+<body>
+
+<header>
+  <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+    <polyline points="22 7 13.5 15.5 8.5 10.5 2 17"/><polyline points="16 7 22 7 22 13"/>
+  </svg>
+  <h1>可转债历史数据查询</h1>
+  <span>基于 AKShare 数据源</span>
+</header>
+
+<div class="container">
+
+  <!-- 列表视图 -->
+  <div id="listView">
+    <div class="list-toolbar">
+      <!-- 第一行：标题 + 搜索框 + 计数 -->
+      <div class="list-toolbar-row list-toolbar-row-search">
+        <h2>📋 全市场可转债</h2>
+        <input class="list-search" type="text" id="listSearch" placeholder="搜索代码/名称/正股..." oninput="filterList()" />
+        <span class="list-count" id="listCount"></span>
+      </div>
+      <!-- 第二行：筛选条件 -->
+      <div class="list-toolbar-row list-toolbar-row-filter">
+        <!-- 信用评级多选下拉 -->
+        <div class="filter-item">
+          <span class="filter-item-label">信用评级</span>
+          <div class="rating-filter" id="ratingFilter">
+            <div class="rating-filter-trigger" id="ratingTrigger" onclick="toggleRatingDropdown()">
+              <span id="ratingTriggerText">全部</span>
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="6 9 12 15 18 9"/></svg>
+            </div>
+            <div class="rating-dropdown" id="ratingDropdown">
+              <div class="rating-dropdown-header">
+                <span>信用评级</span>
+                <button onclick="clearRatingFilter()">清除</button>
+              </div>
+              <div class="rating-options" id="ratingOptions"><!-- 动态生成 --></div>
+            </div>
+          </div>
+        </div>
+        <!-- 债现价区间筛选 -->
+        <div class="filter-item">
+          <span class="filter-item-label">债现价</span>
+          <div class="price-range-filter">
+            <input class="price-range-input" type="number" id="priceMin" placeholder="最低价" min="0" step="0.001" oninput="filterList()" />
+            <span class="price-range-sep">~</span>
+            <input class="price-range-input" type="number" id="priceMax" placeholder="最高价" min="0" step="0.001" oninput="filterList()" />
+          </div>
+        </div>
+        <!-- 转股溢价率区间筛选 -->
+        <div class="filter-item">
+          <span class="filter-item-label">转股溢价率</span>
+          <div class="price-range-filter">
+            <input class="price-range-input" type="number" id="premiumMin" placeholder="最低%" step="0.01" oninput="filterList()" />
+            <span class="price-range-sep">~</span>
+            <input class="price-range-input" type="number" id="premiumMax" placeholder="最高%" step="0.01" oninput="filterList()" />
+          </div>
+        </div>
+        <!-- 在市/退市 单选 -->
+        <div class="filter-item">
+          <span class="filter-item-label">状态</span>
+          <div class="delist-radio-group">
+            <label class="delist-radio-label">
+              <input type="radio" name="delistFilter" value="active" checked onchange="onDelistFilterChange(this)" />
+              <span>在市</span>
+            </label>
+            <label class="delist-radio-label">
+              <input type="radio" name="delistFilter" value="pending" onchange="onDelistFilterChange(this)" />
+              <span>待上市</span>
+            </label>
+            <label class="delist-radio-label">
+              <input type="radio" name="delistFilter" value="delisted" onchange="onDelistFilterChange(this)" />
+              <span>已退市</span>
+            </label>
+            <label class="delist-radio-label">
+              <input type="radio" name="delistFilter" value="all" onchange="onDelistFilterChange(this)" />
+              <span>全部</span>
+            </label>
+          </div>
+        </div>
+        <!-- 冻结列选择 -->
+        <div class="filter-item">
+          <span class="filter-item-label">冻结列</span>
+          <div class="freeze-col-filter">
+            <label class="freeze-col-label">
+              <input type="radio" name="freezeCol" value="0" onchange="onFreezeColChange(this)" />
+              <span>不冻结</span>
+            </label>
+            <label class="freeze-col-label">
+              <input type="radio" name="freezeCol" value="1" onchange="onFreezeColChange(this)" />
+              <span>冻结代码</span>
+            </label>
+            <label class="freeze-col-label">
+              <input type="radio" name="freezeCol" value="2" checked onchange="onFreezeColChange(this)" />
+              <span>冻结代码+名称</span>
+            </label>
+          </div>
+        </div>
+      </div>
+    </div>
+    <div id="listContent"><div class="list-loading">正在加载可转债列表...</div></div>
+  </div>
+
+  <!-- 详情视图 -->
+  <div id="detailView">
+    <button class="back-btn" onclick="showListView()">
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
+        <polyline points="15 18 9 12 15 6"/>
+      </svg>
+      返回列表
+    </button>
+
+    <!-- 基础信息卡片 -->
+    <div class="info-card" id="infoCard">
+      <div class="info-card-header">
+        <h2>
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#3949ab" stroke-width="2">
+            <circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/>
+          </svg>
+          可转债基础信息
+        </h2>
+        <span class="info-badge" id="infoUpdateTime"></span>
+      </div>
+      <div id="infoContent"><div class="info-loading">正在加载基础信息...</div></div>
+      <!-- 付息信息 & 转股价调整记录 Tab 区 -->
+      <div class="detail-tabs-section" id="detailTabsSection" style="display:none">
+        <div class="detail-tab-bar">
+          <button class="detail-tab-btn" id="tabBtnCoupon" onclick="switchDetailTab('coupon')">
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <rect x="3" y="4" width="18" height="18" rx="2"/><line x1="16" y1="2" x2="16" y2="6"/>
+              <line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/>
+            </svg>
+            付息信息
+          </button>
+          <button class="detail-tab-btn" id="tabBtnAdj" onclick="switchDetailTab('adj')">
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <path d="M12 20h9"/><path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"/>
+            </svg>
+            转股价调整记录
+          </button>
+        </div>
+        <div class="detail-tab-panel" id="panelCoupon">
+          <div class="coupon-loading" id="couponLoading">点击「付息信息」标签加载...</div>
+          <div id="couponBody"></div>
+        </div>
+        <div class="detail-tab-panel" id="panelAdj">
+          <div class="adj-loading" id="adjLoading">点击「转股价调整记录」标签加载...</div>
+          <div id="adjBody"></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- 查询表单 -->
+    <div class="query-card">
+      <div class="form-group">
+        <label>可转债代码</label>
+        <input type="text" id="bond_code" placeholder="如 127099" value="127099" />
+      </div>
+      <div class="form-group">
+        <label>开始日期</label>
+        <input type="date" id="start_date" />
+      </div>
+      <div class="form-group">
+        <label>结束日期</label>
+        <input type="date" id="end_date" />
+      </div>
+      <button class="btn btn-primary" onclick="queryData()">查 询</button>
+      <button class="btn btn-secondary" onclick="exportCSV()">导出 CSV</button>
+      <div class="quick-btns">
+        <span>快捷：</span>
+        <button class="quick-btn" onclick="setRange(30)">近1月</button>
+        <button class="quick-btn" onclick="setRange(90)">近3月</button>
+        <button class="quick-btn" onclick="setRange(180)">近6月</button>
+        <button class="quick-btn" onclick="setRange(365)">近1年</button>
+        <button class="quick-btn" onclick="setRange(730)">近2年</button>
+        <button class="quick-btn" onclick="setRange(1825)">近5年</button>
+        <button class="quick-btn" style="border-color:#ff8f00;color:#ff8f00;" onclick="setFullHistory()">全部历史</button>
+      </div>
+    </div>
+
+    <div class="loading" id="loading">正在加载数据，请稍候...</div>
+    <div class="error-msg" id="errorMsg"></div>
+
+    <!-- 统计栏 -->
+    <div class="stats-bar" id="statsBar">
+      <div class="stat-item"><span class="stat-label">债券代码</span><span class="stat-value" id="statCode">-</span></div>
+      <div class="stat-item"><span class="stat-label">数据条数</span><span class="stat-value" id="statTotal">-</span></div>
+      <div class="stat-item"><span class="stat-label">最新收盘</span><span class="stat-value" id="statClose">-</span></div>
+      <div class="stat-item"><span class="stat-label">区间最高</span><span class="stat-value up" id="statHigh">-</span></div>
+      <div class="stat-item"><span class="stat-label">区间最低</span><span class="stat-value down" id="statLow">-</span></div>
+      <div class="stat-item"><span class="stat-label">区间涨跌幅</span><span class="stat-value" id="statChange">-</span></div>
+    </div>
+
+    <!-- 图表 -->
+    <div class="chart-card" id="chartCard">
+      <div id="mainChart"></div>
+    </div>
+
+    <!-- 剩余规模折线图 -->
+    <div class="chart-card" id="remainChartCard">
+      <div id="remainChart" style="width:100%;height:280px;"></div>
+    </div>
+
+    <!-- 数据表格 -->
+    <div class="table-card" id="tableCard">
+      <div class="table-header">
+        <h3>历史成交明细</h3>
+        <span class="page-info" id="pageInfo"></span>
+      </div>
+      <div class="table-wrapper">
+        <table>
+          <thead>
+            <tr>
+              <th>日期</th>
+              <th>收盘价（元）</th>
+              <th>正股收盘价（元）</th>
+              <th>转股价值（元）</th>
+              <th>转股溢价率</th>
+              <th>开盘价</th>
+              <th>最高价</th>
+              <th>最低价</th>
+              <th>成交量（手）</th>
+              <th>剩余规模（亿）</th>
+              <th>到期收益率（%）</th>
+            </tr>
+          </thead>
+          <tbody id="tableBody"></tbody>
+        </table>
+      </div>
+      <div class="pagination" id="pagination"></div>
+    </div>
+
+  </div><!-- /detailView -->
+
+</div>
+
+<script src="/static/js/bond-list.js"></script>
+<script src="/static/js/bond-detail.js"></script>
+<script src="/static/js/bond-chart.js"></script>
+<script src="/static/js/bond-table.js"></script>
+<script src="/static/js/main.js"></script>
+</body>
+</html>
