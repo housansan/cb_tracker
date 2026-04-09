@@ -12,6 +12,10 @@ header {
   align-items: center;
   gap: 12px;
   box-shadow: 0 2px 8px rgba(0,0,0,.25);
+  /* 滚动时固定在顶部 */
+  position: sticky;
+  top: 0;
+  z-index: 200;
 }
 header h1 { font-size: 1.4rem; font-weight: 600; letter-spacing: 1px; }
 header span { font-size: 0.85rem; opacity: .75; }
@@ -542,6 +546,8 @@ tr:hover td { background: #f5f5ff; }
   overflow-y: auto;
   margin-top: 12px;
   max-height: calc(100vh - 220px);
+  border-radius: 10px;
+  box-shadow: 0 1px 6px rgba(0,0,0,.08);
 }
 /* 表头固定，滚动时始终可见 */
 .bond-list-table thead th {
@@ -597,12 +603,10 @@ tr:hover td { background: #f5f5ff; }
 }
 .bond-list-table {
   width: 100%;
-  border-collapse: collapse;
+  border-collapse: separate;
+  border-spacing: 0;
   font-size: .85rem;
   background: #fff;
-  border-radius: 10px;
-  overflow: hidden;
-  box-shadow: 0 1px 6px rgba(0,0,0,.08);
 }
 .bond-list-table thead tr { background: #e8eaf6; }
 .bond-list-table th {
@@ -614,6 +618,28 @@ tr:hover td { background: #f5f5ff; }
 }
 .bond-list-table th.num { text-align: right; }
 .bond-list-table th.center { text-align: center; }
+/* 图钉按钮 */
+.col-pin-btn {
+  display: inline-block;
+  margin-left: 4px;
+  font-size: .75rem;
+  opacity: 0.25;
+  cursor: pointer;
+  filter: grayscale(1);
+  transform: rotate(45deg);
+  transition: opacity .15s, filter .15s;
+  vertical-align: middle;
+  line-height: 1;
+}
+.col-pin-btn:hover {
+  opacity: 0.7;
+  filter: grayscale(0);
+}
+.col-pin-btn.pinned {
+  opacity: 1;
+  filter: grayscale(0);
+  transform: rotate(0deg);
+}
 .bond-list-table th.sortable {
   cursor: pointer;
   user-select: none;
@@ -730,4 +756,76 @@ tr:hover td { background: #f5f5ff; }
   color: #c62828;
   margin-top: 16px;
   font-size: .88rem;
+}
+
+/* ── 目标买入价计算器 ─────────────────────────────────────────── */
+.target-calc-section {
+  margin-top: 16px;
+  padding: 14px 16px 12px;
+  background: #f8f9ff;
+  border: 1px solid #e8eaf6;
+  border-radius: 10px;
+}
+.target-calc-header {
+  display: flex; align-items: center; justify-content: space-between;
+  margin-bottom: 10px; flex-wrap: wrap; gap: 8px;
+}
+.target-calc-title { font-size: .9rem; font-weight: 600; color: #1a237e; }
+.target-calc-hint  { font-size: .8rem; color: #888; }
+.target-calc-hint strong { color: #e53935; font-weight: 700; }
+
+/* 预设按钮行 */
+.target-preset-row {
+  display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 12px;
+}
+.target-preset-btn {
+  padding: 4px 12px;
+  border: 1px solid #c5cae9;
+  border-radius: 20px;
+  background: #fff;
+  font-size: .8rem;
+  color: #3949ab;
+  cursor: pointer;
+  transition: background .12s, border-color .12s, color .12s;
+}
+.target-preset-btn:hover  { background: #e8eaf6; }
+.target-preset-btn.active { background: #3949ab; color: #fff; border-color: #3949ab; }
+
+.target-calc-body {
+  display: flex; align-items: center; flex-wrap: wrap; gap: 12px;
+}
+.target-calc-label { font-size: .8rem; color: #666; white-space: nowrap; }
+
+.target-calc-input-row {
+  display: flex; align-items: center; gap: 4px;
+}
+.target-ytm-input {
+  width: 100px;
+  padding: 6px 10px;
+  border: 1px solid #c5cae9;
+  border-radius: 6px;
+  font-size: .9rem;
+  outline: none;
+  transition: border-color .15s;
+}
+.target-ytm-input:focus { border-color: #3949ab; }
+.target-ytm-unit { font-size: .85rem; color: #888; }
+
+.target-calc-result-row {
+  display: flex; align-items: center; gap: 8px;
+}
+.target-calc-result-label { font-size: .8rem; color: #666; white-space: nowrap; }
+.target-calc-result {
+  font-size: 1.15rem; font-weight: 700; color: #1a237e; min-width: 80px;
+}
+
+.target-price-gap {
+  font-size: .8rem; font-weight: 600; white-space: nowrap; width: 100%;
+  margin-top: 4px;
+}
+.target-price-gap.gap-good { color: #43a047; }
+.target-price-gap.gap-over { color: #9e9e9e; }
+
+.target-calc-note {
+  margin-top: 10px; font-size: .72rem; color: #ccc; text-align: right; width: 100%;
 }

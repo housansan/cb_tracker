@@ -1,6 +1,7 @@
 from flask import Flask, render_template, request, jsonify
 from bond import get_convertible_bond_history, get_all_convertible_bonds, get_bond_info, fetch_bond_detail_only, get_bond_adj_logs
 from bond.fetch import fetch_all_cb_remaining
+from bond.history import build_cashflows_from_coupon_info
 from config import LOG_CONFIG, EXPORT_CONFIG, DB_CONFIG, BOND_CONFIG
 from datetime import datetime, timedelta
 from logging.handlers import TimedRotatingFileHandler
@@ -153,6 +154,26 @@ def _get_price_map() -> dict:
         return _price_cache["data"] or {}
 
 
+def _attach_cashflows(info: dict) -> None:
+    """
+    为未退市债券附加现金流数据，供前端实时计算目标买入价。
+    已退市债券注入空列表，不做计算。
+    """
+    if info.get("退市日期"):
+        info["cashflows"] = []
+        info["times"] = []
+        return
+    try:
+        coupon_info = info.get("付息信息") or {}
+        cashflows, times = build_cashflows_from_coupon_info(coupon_info)
+        info["cashflows"] = cashflows
+        info["times"] = times
+    except Exception as _e:
+        logger.warning("[bond_info] 现金流构建失败 err=%s", _e)
+        info["cashflows"] = []
+        info["times"] = []
+
+
 @app.route("/")
 def index():
     return render_template("index.html")
@@ -224,6 +245,23 @@ def api_bond_info():
                 db_row = query_bond(bc_int)
                 if db_row:
                     info = db_row_to_bond_info(db_row)
+                    # 实时补充价格字段（债现价、正股价、转股溢价率）
+                    try:
+                        price_map = _get_price_map()
+                        prices = price_map.get(bond_code.strip(), {})
+                        info["债现价"]     = prices.get("债现价")
+                        info["正股价"]     = prices.get("正股价")
+                        info["转股溢价率"] = prices.get("转股溢价率")
+                        # 计算转股价值：正股价 / 转股价 * 100
+                        try:
+                            conv_price = info.get("转股价")
+                            stock_price = info.get("正股价")
+                            if conv_price and stock_price and conv_price > 0:
+                                info["转股价值"] = round(float(stock_price) / float(conv_price) * 100, 4)
+                        except Exception:
+                            pass
+                    except Exception as _pe:
+                        logger.warning("[/api/bond_info] 补充实时价格失败 bond_code=%s err=%s", bond_code, _pe)
                     # 实时补充剩余规模（从东方财富全量缓存读，不写 DB）
                     try:
                         all_remaining = fetch_all_cb_remaining()
@@ -231,6 +269,7 @@ def api_bond_info():
                     except Exception as _re:
                         logger.warning("[/api/bond_info] 补充剩余规模失败 bond_code=%s err=%s", bond_code, _re)
                     logger.info("[/api/bond_info] DB 缓存命中 bond_code=%s age=%.0fs", bond_code, age)
+                    _attach_cashflows(info)
                     return jsonify({"success": True, "data": info, "from_cache": True})
     except Exception as _e:
         logger.warning("[/api/bond_info] DB 读取失败，降级请求接口 bond_code=%s err=%s", bond_code, _e)
@@ -252,6 +291,7 @@ def api_bond_info():
         logger.warning("[/api/bond_info] 写入 DB 失败（不影响返回）bond_code=%s err=%s", bond_code, _e)
 
     logger.info("[/api/bond_info] 返回基础信息 bond_code=%s name=%s", bond_code, info.get("债券简称", ""))
+    _attach_cashflows(info)
     return jsonify({"success": True, "data": info})
 
 

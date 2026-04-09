@@ -11,6 +11,7 @@ bond/db.py —— SQLite 数据库访问层
 """
 
 import os
+import re
 import sqlite3
 import logging
 from typing import Optional
@@ -40,7 +41,7 @@ CREATE TABLE IF NOT EXISTS t_bond_info (
     delist_date      TIMESTAMP,                                             -- 退市日期，NULL=在途
     value_date       TIMESTAMP,                                             -- 起息日
     expire_date      TIMESTAMP,                                             -- 到期日
-    redeem_price     INTEGER UNSIGNED,                                      -- 到期赎回价×100（元），如110.00→11000
+    redeem_clause    VARCHAR(500),                                          -- 赎回条款原文（用于实时解析赎回价，不存储解析结果）
     coupon_rate_desc VARCHAR(500),                                          -- 利率说明原文
     coupon_rates     VARCHAR(200),                                          -- 各年票息率 JSON数组字符串
     coupon_pay_dates VARCHAR(500),                                          -- 付息日列表 JSON数组字符串
@@ -131,6 +132,18 @@ def init_db(db_dir: str) -> None:
             except Exception as e:
                 logger.warning("[db] 添加列 %s 失败：%s", col_name, e)
 
+    # 在线迁移：t_bond_info 从 redeem_price（整数存储解析结果）迁移到
+    # redeem_clause（保存原始文本，读取时实时解析）
+    bond_info_cols = {
+        row[1]
+        for row in _conn.execute("PRAGMA table_info(t_bond_info)").fetchall()
+    }
+    if "redeem_clause" not in bond_info_cols:
+        try:
+            _conn.execute("ALTER TABLE t_bond_info ADD COLUMN redeem_clause VARCHAR(500)")
+            logger.info("[db] 迁移：t_bond_info 新增 redeem_clause 列")
+        except Exception as e:
+            logger.warning("[db] 添加列 redeem_clause 失败：%s", e)
     _conn.commit()
 
     logger.info(f"[db] 数据库已初始化：{db_path}")
@@ -159,7 +172,7 @@ _UPSERT_FIELDS = [
     "bond_name", "stock_code", "stock_name",
     "conv_price", "issue_size", "credit_rating",
     "listing_date", "delist_date", "value_date", "expire_date",
-    "redeem_price", "coupon_rate_desc", "coupon_rates", "coupon_pay_dates",
+    "redeem_clause", "coupon_rate_desc", "coupon_rates", "coupon_pay_dates",
     "updated_at",
 ]
 
@@ -182,7 +195,7 @@ def upsert_bond(data: dict) -> None:
       delist_date      str   退市日期或 None
       value_date       str   起息日或 None
       expire_date      str   到期日或 None
-      redeem_price     int   到期赎回价×100
+      redeem_clause    str   赎回条款原文
       coupon_rate_desc str   利率说明原文
       coupon_rates     str   各年票息率 JSON 字符串
       coupon_pay_dates str   付息日列表 JSON 字符串
@@ -226,7 +239,7 @@ def upsert_bonds(data_list: list[dict]) -> int:
     # 列表接口不提供的详细字段：只在新值非 NULL 时才覆盖，避免清空已有详细信息
     _DETAIL_FIELDS = {
         "listing_date", "delist_date", "value_date", "expire_date",
-        "redeem_price", "coupon_rate_desc", "coupon_rates", "coupon_pay_dates",
+        "redeem_clause", "coupon_rate_desc", "coupon_rates", "coupon_pay_dates",
     }
     # 名称字段：只在新值非空字符串时才覆盖，避免已退市债券名称被空值清空
     _NAME_FIELDS = {"bond_name", "stock_name"}
@@ -376,7 +389,7 @@ def bond_info_to_db_row(info: dict) -> Optional[dict]:
         "delist_date":      _date_to_ts(info.get("退市日期")),
         "value_date":       _date_to_ts(coupon_info.get("起息日")),
         "expire_date":      _date_to_ts(coupon_info.get("到期日")),
-        "redeem_price":     _to_int_price(coupon_info.get("赎回价")),
+        "redeem_clause":    coupon_info.get("赎回条款") or "",
         "coupon_rate_desc": coupon_info.get("利率说明") or "",
         "coupon_rates":     json.dumps(coupon_info.get("票息率列表") or [], ensure_ascii=False),
         "coupon_pay_dates": json.dumps(coupon_info.get("付息日列表") or [], ensure_ascii=False),
@@ -418,11 +431,26 @@ def bond_list_row_to_db_row(row: dict) -> Optional[dict]:
         "delist_date":      None,
         "value_date":       None,
         "expire_date":      None,
-        "redeem_price":     None,
+        "redeem_clause":    None,
         "coupon_rate_desc": None,
         "coupon_rates":     None,
         "coupon_pay_dates": None,
     }
+
+
+def _parse_redeem_price(redeem_clause: str, rate_desc: str, coupon_rates: list) -> float:
+    """
+    从赎回条款原文和利率说明中解析到期赎回价（元）。
+    优先顺序：赎回条款 → 利率说明 → 末期票息公式回退。
+    """
+    m = (re.search(r'面值[的]?(\d+(?:\.\d+)?)%', redeem_clause) or
+         re.search(r'面值[的]?(\d+(?:\.\d+)?)%', rate_desc) or
+         re.search(r'(\d+(?:\.\d+)?)元[（(]含最后', rate_desc))
+    if m:
+        return round(float(m.group(1)), 4)
+    # 回退：100 × (1 + 末期票息率/100)
+    last_rate = coupon_rates[-1] if coupon_rates else 0
+    return round(100 * (1 + last_rate / 100), 4)
 
 
 def db_row_to_bond_info(row: dict) -> dict:
@@ -452,11 +480,17 @@ def db_row_to_bond_info(row: dict) -> dict:
     except Exception:
         pass
 
+    # 实时解析赎回价，避免缓存旧的错误解析结果
+    redeem_clause = row.get("redeem_clause") or ""
+    rate_desc     = row.get("coupon_rate_desc") or ""
+    redeem_price  = _parse_redeem_price(redeem_clause, rate_desc, coupon_rates)
+
     coupon_info = {
         "起息日":     _ts_to_date(row.get("value_date")),
         "到期日":     _ts_to_date(row.get("expire_date")),
-        "赎回价":     _from_int_price(row.get("redeem_price")),
-        "利率说明":   row.get("coupon_rate_desc") or "",
+        "赎回价":     redeem_price,
+        "赎回条款":   redeem_clause,
+        "利率说明":   rate_desc,
         "票息率列表": coupon_rates,
         "付息日列表": coupon_pay_dates,
     }

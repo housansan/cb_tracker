@@ -64,7 +64,7 @@ function renderBondInfo(d) {
           <span class="info-item-value ${it.cls || ''}">${it.value}</span>
           ${it.sub ? `<span class="info-item-sub">${it.sub}</span>` : ""}
         </div>`).join("")
-    }</div>`;
+    }</div>` + renderTargetPriceCalc(d);
 }
 
 // ── 详情 Tab 切换 ─────────────────────────────────────────
@@ -210,4 +210,98 @@ function renderCouponInfo(ci) {
       </table>
     </div>`;
   _couponLoaded = true;
+}
+
+// ── 目标买入价计算器 ───────────────────────────────────────────
+let _targetCashflows = [];
+let _targetTimes     = [];
+let _targetCurPrice  = 0;
+
+const TARGET_PRESETS = [
+  { label: "保本",  ytm: 0   },
+  { label: "+1%",   ytm: 1   },
+  { label: "+2%",   ytm: 2   },
+  { label: "-1%",   ytm: -1  },
+  { label: "-2%",   ytm: -2  },
+];
+
+// 计算目标买入价（纯前端，无需请求接口）
+function calcTargetPrice(ytmPct) {
+  if (!_targetCashflows.length) return null;
+  const r = ytmPct / 100;
+  if (Math.abs(r + 1) < 1e-9) return null;
+  const price = _targetCashflows.reduce((sum, cf, i) => sum + cf / Math.pow(1 + r, _targetTimes[i]), 0);
+  return Math.round(price * 100) / 100;
+}
+
+// 统一更新结果展示
+function _updateTargetResult(ytmPct) {
+  const resultEl = document.getElementById("targetPriceResult");
+  const gapEl    = document.getElementById("targetPriceGap");
+  if (!resultEl) return;
+  if (ytmPct === null || isNaN(ytmPct)) {
+    resultEl.textContent = "—";
+    gapEl.textContent = ""; gapEl.className = "target-price-gap";
+    return;
+  }
+  const p = calcTargetPrice(ytmPct);
+  if (p == null) { resultEl.textContent = "无法计算"; gapEl.textContent = ""; return; }
+  resultEl.textContent = p.toFixed(2) + " 元";
+  const gap = p - _targetCurPrice;
+  const isGood = gap > 0;
+  gapEl.textContent = (gap >= 0 ? "▲ +" : "▼ ") + gap.toFixed(2) + " 元  " + (isGood ? "✓ 当前价低于目标价" : "当前价高于目标价");
+  gapEl.className = "target-price-gap " + (isGood ? "gap-good" : "gap-over");
+}
+
+// 点击预设按钮
+function onPresetClick(ytm, el) {
+  document.querySelectorAll(".target-preset-btn").forEach(b => b.classList.remove("active"));
+  el.classList.add("active");
+  document.getElementById("targetYtmInput").value = ytm;
+  _updateTargetResult(ytm);
+}
+
+// 用户自由输入
+function onTargetYtmInput() {
+  document.querySelectorAll(".target-preset-btn").forEach(b => b.classList.remove("active"));
+  const val = parseFloat(document.getElementById("targetYtmInput").value);
+  _updateTargetResult(isNaN(val) ? null : val);
+}
+
+// 渲染目标价计算器区块，附加到 infoContent 之后
+function renderTargetPriceCalc(d) {
+  if (d["退市日期"]) return "";   // 已退市不显示
+  const cashflows = d["cashflows"] || [];
+  const times     = d["times"]     || [];
+  if (!cashflows.length) return "";  // 无未来现金流
+
+  _targetCashflows = cashflows;
+  _targetTimes     = times;
+  _targetCurPrice  = parseFloat(d["债现价"] || 0);
+
+  const presetBtns = TARGET_PRESETS.map(p =>
+    `<button class="target-preset-btn" onclick="onPresetClick(${p.ytm}, this)">${p.label}</button>`
+  ).join("");
+
+  return `<div class="target-calc-section">
+    <div class="target-calc-header">
+      <span class="target-calc-title">📍 目标买入价</span>
+      <span class="target-calc-hint">当前价 <strong>${_targetCurPrice.toFixed(3)}</strong> 元</span>
+    </div>
+    <div class="target-preset-row">${presetBtns}</div>
+    <div class="target-calc-body">
+      <label class="target-calc-label">自定义收益率</label>
+      <div class="target-calc-input-row">
+        <input id="targetYtmInput" class="target-ytm-input" type="number" step="0.1"
+               placeholder="如 1.5" oninput="onTargetYtmInput()" />
+        <span class="target-ytm-unit">%</span>
+      </div>
+      <div class="target-calc-result-row">
+        <span class="target-calc-result-label">对应买入价</span>
+        <span id="targetPriceResult" class="target-calc-result">—</span>
+      </div>
+      <div id="targetPriceGap" class="target-price-gap"></div>
+    </div>
+    <div class="target-calc-note">基于剩余现金流折现反推，仅供参考</div>
+  </div>`;
 }

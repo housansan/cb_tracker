@@ -103,9 +103,19 @@ function _closeRatingOnOutside(e) {
   }
 }
 
-// 冻结列选择变化
+// 冻结列选择变化（保留备用）
 function onFreezeColChange(radio) {
   _freezeCols = parseInt(radio.value);
+  renderBondList(_filteredBonds);
+}
+
+// 点击列头图钉切换冻结
+function toggleFreezeCol(colIdx) {
+  if (colIdx < _freezeCols) {
+    _freezeCols = colIdx;      // 取消冻结此列及之后
+  } else {
+    _freezeCols = colIdx + 1;  // 冻结到此列（含）
+  }
   renderBondList(_filteredBonds);
 }
 
@@ -229,17 +239,11 @@ const hasRemain     = '剩余规模' in sample;
       : '<span class="sort-icon active">↓</span>';
   }
 
-  // 根据冻结列数生成 th 的 sticky 属性
-  // 列宽：债券代码=100px，债券名称=100px
-  const COL_WIDTHS = [100, 100]; // 前两列宽度
-  function _frozenThStyle(colIdx) {
-    if (colIdx >= _freezeCols) return '';
-    const left = COL_WIDTHS.slice(0, colIdx).reduce((a, b) => a + b, 0);
-    const isLast = colIdx === _freezeCols - 1;
-    return ` class="col-frozen${isLast ? ' col-frozen-last' : ''}" style="left:${left}px"`;
-  }
+  // 根据冻结列数生成 td 的 sticky 属性
+  // 列宽：债券代码=100px，债券名称=100px，正股代码=100px，正股名称=100px
+  const COL_WIDTHS = [100, 100, 100, 100]; // 前四列宽度
   function _frozenTdStyle(colIdx) {
-    if (colIdx >= _freezeCols) return '';
+    if (colIdx >= _freezeCols) return ' class="num"';
     const left = COL_WIDTHS.slice(0, colIdx).reduce((a, b) => a + b, 0);
     const isLast = colIdx === _freezeCols - 1;
     return ` class="num col-frozen${isLast ? ' col-frozen-last' : ''}" style="left:${left}px"`;
@@ -251,15 +255,35 @@ const hasRemain     = '剩余规模' in sample;
     return ` class="col-frozen${isLast ? ' col-frozen-last' : ''}" style="left:${left}px"`;
   }
 
-  let thead = `<tr><th${_frozenThStyle(0)}>债券代码</th><th${_frozenThStyle(1)}>债券名称</th><th class="num">正股代码</th><th>正股名称</th>`;
+  // 图钉图标：已冻结高亮竖直，未冻结灰色斜放
+  function _pinIcon(colIdx) {
+    const frozen = colIdx < _freezeCols;
+    return `<span class="col-pin-btn${frozen ? ' pinned' : ''}" onclick="event.stopPropagation();toggleFreezeCol(${colIdx})" title="${frozen ? '点击取消固定' : '点击固定此列'}">📌</span>`;
+  }
+
+  // 生成前4列可冻结列的 <th>
+  function _thWrap(colIdx, label, extraClass = '') {
+    const frozen = colIdx < _freezeCols;
+    const isLast = frozen && colIdx === _freezeCols - 1;
+    const left = COL_WIDTHS.slice(0, colIdx).reduce((a, b) => a + b, 0);
+    const classes = [extraClass, frozen ? 'col-frozen' : '', isLast ? 'col-frozen-last' : ''].filter(Boolean).join(' ');
+    const style = frozen ? ` style="left:${left}px"` : '';
+    return `<th class="${classes || 'th-freezable'}"${style}>${label}${_pinIcon(colIdx)}</th>`;
+  }
+
+  let thead = `<tr>
+    ${_thWrap(0, '债券代码')}
+    ${_thWrap(1, '债券名称')}
+    ${_thWrap(2, '正股代码', 'num')}
+    ${_thWrap(3, '正股名称')}`;
   if (hasPrice)       thead += `<th class="num sortable" onclick="sortList('债现价')">债现价${_sortIcon('债现价')}</th>`;
   if (showRemainYears) thead += `<th class="num sortable" onclick="sortList('到期日期')">剩余年限${_sortIcon('到期日期')}</th>`;
   if (hasStockPrice)  thead += '<th class="num">正股价</th>';
   if (hasPremium)     thead += `<th class="num sortable" onclick="sortList('转股溢价率')">转股溢价率${_sortIcon('转股溢价率')}</th>`;
-  if (hasRating)       thead += `<th class="center sortable" onclick="sortList('信用评级')">信用评级${_sortIcon('信用评级')}</th>`;
-  if (hasRemain)       thead += `<th class="num sortable" onclick="sortList('剩余规模')">剩余规模(亿)${_sortIcon('剩余规模')}</th>`;
-  if (hasListingDate)  thead += `<th class="center sortable" onclick="sortList('上市日期')">上市日期${_sortIcon('上市日期')}</th>`;
-  if (hasDelistDate)   thead += `<th class="center sortable" onclick="sortList('退市日期')">退市日期${_sortIcon('退市日期')}</th>`;
+  if (hasRating)      thead += `<th class="center sortable" onclick="sortList('信用评级')">信用评级${_sortIcon('信用评级')}</th>`;
+  if (hasRemain)      thead += `<th class="num sortable" onclick="sortList('剩余规模')">剩余规模(亿)${_sortIcon('剩余规模')}</th>`;
+  if (hasListingDate) thead += `<th class="center sortable" onclick="sortList('上市日期')">上市日期${_sortIcon('上市日期')}</th>`;
+  if (hasDelistDate)  thead += `<th class="center sortable" onclick="sortList('退市日期')">退市日期${_sortIcon('退市日期')}</th>`;
   thead += '</tr>';
 
   const tbody = sorted.map(b => {
@@ -270,8 +294,8 @@ const hasRemain     = '剩余规模' in sample;
     let row = `<tr>
       <td${_frozenTdTextStyle(0)}><a class="bond-code-link" onclick="openDetail('${code}')">${code}</a></td>
       <td${_frozenTdTextStyle(1)}>${name}</td>
-      <td class="num">${sc}</td>
-      <td>${sn}</td>`;
+      <td${_frozenTdStyle(2)}>${sc}</td>
+      <td${_frozenTdTextStyle(3)}>${sn}</td>`;
     if (hasPrice) {
       const p = b['债现价'] != null ? parseFloat(b['债现价']).toFixed(3) : '-';
       row += `<td class="num">${p}</td>`;
