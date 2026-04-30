@@ -6,6 +6,14 @@ let _sortKey = null;   // 当前排序字段
 let _sortDir = 'asc';  // 'asc' | 'desc'
 let _delistFilter = 'active'; // 'active' | 'delisted' | 'pending' | 'all'
 let _freezeCols = 2; // 冻结前几列：0 | 1 | 2
+
+// 切换筛选面板显示/隐藏
+function toggleFilterPanel() {
+  const panel = document.getElementById('filterPanel');
+  const btn = document.querySelector('.filter-toggle-btn');
+  panel.classList.toggle('open');
+  btn.classList.toggle('active');
+}
 async function loadBondList() {
   document.getElementById('listContent').innerHTML = '<div class="list-loading">正在加载可转债列表...</div>';
   try {
@@ -18,6 +26,25 @@ async function loadBondList() {
     _allBonds = json.data;
     _buildRatingOptions(_allBonds);
     filterList(); // 应用默认过滤（在市）后再渲染
+    // 后台有补全任务时，分两次静默刷新（补全完后缓存会清除）
+    if (json.pending_fill) {
+      // 第一次：35s 后刷（补全快的数据已写入）
+      // 第二次：150s 后再刷（全部补全完）
+      [35000, 150000].forEach(delay => {
+        setTimeout(() => {
+          fetch('/api/bond_list?_bust=' + Date.now())
+            .then(r => r.json())
+            .then(j => {
+              if (j.success && j.data) {
+                _allBonds = j.data;
+                _buildRatingOptions(_allBonds);
+                filterList();
+              }
+            })
+            .catch(() => {});
+        }, delay);
+      });
+    }
   } catch(e) {
     document.getElementById('listContent').innerHTML = `<div style="color:#c62828;padding:24px">⚠ 加载失败：${e.message}</div>`;
   }
@@ -127,6 +154,10 @@ function onDelistFilterChange(radio) {
 
 function filterList() {
   const kw = document.getElementById('listSearch').value.trim().toLowerCase();
+
+  // 更新筛选计数
+  _updateFilterCount();
+
   _filteredBonds = _allBonds.filter(b => {
     // 关键词筛选
     if (kw) {
@@ -159,6 +190,80 @@ function filterList() {
       if (!isNaN(premiumMin) && premium < premiumMin) return false;
       if (!isNaN(premiumMax) && premium > premiumMax) return false;
     }
+    // 转股价值区间筛选
+    const convertValueMin = parseFloat(document.getElementById('convertValueMin').value);
+    const convertValueMax = parseFloat(document.getElementById('convertValueMax').value);
+    if (!isNaN(convertValueMin) || !isNaN(convertValueMax)) {
+      const convertValue = parseFloat(b['转股价值']);
+      if (isNaN(convertValue)) return false;
+      if (!isNaN(convertValueMin) && convertValue < convertValueMin) return false;
+      if (!isNaN(convertValueMax) && convertValue > convertValueMax) return false;
+    }
+    // 到期收益率区间筛选
+    const ytmMin = parseFloat(document.getElementById('ytmMin').value);
+    const ytmMax = parseFloat(document.getElementById('ytmMax').value);
+    if (!isNaN(ytmMin) || !isNaN(ytmMax)) {
+      const ytm = parseFloat(b['到期收益率']);
+      if (isNaN(ytm)) return false;
+      if (!isNaN(ytmMin) && ytm < ytmMin) return false;
+      if (!isNaN(ytmMax) && ytm > ytmMax) return false;
+    }
+    // 剩余年限区间筛选（仅对有到期日期的债券生效）
+    const remainYearsMin = parseFloat(document.getElementById('remainYearsMin').value);
+    const remainYearsMax = parseFloat(document.getElementById('remainYearsMax').value);
+    if (!isNaN(remainYearsMin) || !isNaN(remainYearsMax)) {
+      const ed2 = b['到期日期'] || '';
+      if (ed2.length !== 8) return false;
+      const expireMs2 = new Date(`${ed2.slice(0,4)}-${ed2.slice(4,6)}-${ed2.slice(6,8)}`).getTime();
+      const diffYears = (expireMs2 - Date.now()) / (1000 * 60 * 60 * 24 * 365.25);
+      if (!isNaN(remainYearsMin) && diffYears < remainYearsMin) return false;
+      if (!isNaN(remainYearsMax) && diffYears > remainYearsMax) return false;
+    }
+    // 剩余规模区间筛选（亿）
+    const remainScaleMin = parseFloat(document.getElementById('remainScaleMin').value);
+    const remainScaleMax = parseFloat(document.getElementById('remainScaleMax').value);
+    if (!isNaN(remainScaleMin) || !isNaN(remainScaleMax)) {
+      const scale = parseFloat(b['剩余规模']);
+      if (isNaN(scale)) return false;
+      if (!isNaN(remainScaleMin) && scale < remainScaleMin) return false;
+      if (!isNaN(remainScaleMax) && scale > remainScaleMax) return false;
+    }
+    // 发行规模区间筛选（亿）
+    const issueScaleMin = parseFloat(document.getElementById('issueScaleMin').value);
+    const issueScaleMax = parseFloat(document.getElementById('issueScaleMax').value);
+    if (!isNaN(issueScaleMin) || !isNaN(issueScaleMax)) {
+      const issueScale = parseFloat(b['发行规模']);
+      if (isNaN(issueScale)) return false;
+      if (!isNaN(issueScaleMin) && issueScale < issueScaleMin) return false;
+      if (!isNaN(issueScaleMax) && issueScale > issueScaleMax) return false;
+    }
+    // 正股价区间筛选
+    const stockPriceMin = parseFloat(document.getElementById('stockPriceMin').value);
+    const stockPriceMax = parseFloat(document.getElementById('stockPriceMax').value);
+    if (!isNaN(stockPriceMin) || !isNaN(stockPriceMax)) {
+      const sp = parseFloat(b['正股价']);
+      if (isNaN(sp)) return false;
+      if (!isNaN(stockPriceMin) && sp < stockPriceMin) return false;
+      if (!isNaN(stockPriceMax) && sp > stockPriceMax) return false;
+    }
+    // 正股PB区间筛选
+    const stockPbMin = parseFloat(document.getElementById('stockPbMin').value);
+    const stockPbMax = parseFloat(document.getElementById('stockPbMax').value);
+    if (!isNaN(stockPbMin) || !isNaN(stockPbMax)) {
+      const stockPb = parseFloat(b['正股PB']);
+      if (isNaN(stockPb)) return false;
+      if (!isNaN(stockPbMin) && stockPb < stockPbMin) return false;
+      if (!isNaN(stockPbMax) && stockPb > stockPbMax) return false;
+    }
+    // 正股市值区间筛选（亿）
+    const stockMarketCapMin = parseFloat(document.getElementById('stockMarketCapMin').value);
+    const stockMarketCapMax = parseFloat(document.getElementById('stockMarketCapMax').value);
+    if (!isNaN(stockMarketCapMin) || !isNaN(stockMarketCapMax)) {
+      const stockMarketCap = parseFloat(b['正股市值']);
+      if (isNaN(stockMarketCap)) return false;
+      if (!isNaN(stockMarketCapMin) && stockMarketCap < stockMarketCapMin) return false;
+      if (!isNaN(stockMarketCapMax) && stockMarketCap > stockMarketCapMax) return false;
+    }
     // 根据 _delistFilter 过滤状态
     // 名称含"退"字（如"普利退债"）视为已退市，即使接口未返回退市日期
     const nameHasRetired = (b['债券简称'] || '').includes('退');
@@ -166,14 +271,106 @@ function filterList() {
     const ed = b['到期日期'] || '';
     const isExpired = ed.length === 8 && new Date(`${ed.slice(0,4)}-${ed.slice(4,6)}-${ed.slice(6,8)}`).getTime() < Date.now();
     const isDelisted = !!b['退市日期'] || nameHasRetired || isExpired; // 退市日期有值 或 名称含"退" 或 已到期 → 已退市
-    const isPending  = !b['上市日期'] && !isDelisted;     // 上市日期为空且非退市 → 待上市
+    // 待上市：没有上市日期 且 没有债现价（有债现价则必定已上市）且 非退市
+    const hasPrice_  = b['债现价'] != null;
+    const isPending  = !b['上市日期'] && !hasPrice_ && !isDelisted;
     const isActive   = !isPending && !isDelisted;         // 已上市且未退市 → 在市
     if (_delistFilter === 'active'   && !isActive)   return false;
     if (_delistFilter === 'delisted' && !isDelisted)  return false;
     if (_delistFilter === 'pending'  && !isPending)   return false;
+
+    // 市场筛选（通过正股代码前缀判断）
+    const marketRadio = document.querySelector('input[name="marketFilter"]:checked');
+    const selectedMarket = marketRadio ? marketRadio.value : 'all';
+    if (selectedMarket !== 'all') {
+      const stockCode = (b['正股代码'] || '').trim();
+      let market = '';
+      if (/^(600|601|603|605|609)/.test(stockCode)) market = 'sh';
+      else if (/^(000|001|002|003)/.test(stockCode)) market = 'sz';
+      else if (/^(688|689)/.test(stockCode)) market = 'kcb';
+      else if (/^(300|301)/.test(stockCode)) market = 'cyb';
+      if (market !== selectedMarket) return false;
+    }
+
+    // 上市时间筛选
+    const listingDateMin = document.getElementById('listingDateMin').value; // YYYY-MM-DD
+    const listingDateMax = document.getElementById('listingDateMax').value;
+    if (listingDateMin || listingDateMax) {
+      const ld = b['上市日期'] || '';
+      if (ld.length !== 8) return false;
+      const ldFormatted = `${ld.slice(0,4)}-${ld.slice(4,6)}-${ld.slice(6,8)}`;
+      if (listingDateMin && ldFormatted < listingDateMin) return false;
+      if (listingDateMax && ldFormatted > listingDateMax) return false;
+    }
+
+    // 强赎状态筛选
+    const filterStrongRedeem = document.getElementById('filterStrongRedeem');
+    if (filterStrongRedeem && filterStrongRedeem.checked) {
+      if (!b['强赎状态'] || b['强赎状态'] !== '强赎中') return false;
+    }
+    const filterNearStrongRedeem = document.getElementById('filterNearStrongRedeem');
+    if (filterNearStrongRedeem && filterNearStrongRedeem.checked) {
+      if (!b['强赎状态'] || b['强赎状态'] !== '临近强赎') return false;
+    }
+
+    // 回售状态筛选
+    const filterPutback = document.getElementById('filterPutback');
+    if (filterPutback && filterPutback.checked) {
+      if (!b['回售状态'] || b['回售状态'] !== '回售中') return false;
+    }
+    const filterNearPutback = document.getElementById('filterNearPutback');
+    if (filterNearPutback && filterNearPutback.checked) {
+      if (!b['回售状态'] || b['回售状态'] !== '临近回售') return false;
+    }
+
     return true;
   });
   renderBondList(_filteredBonds);
+}
+
+// 更新筛选计数
+function _updateFilterCount() {
+  let count = 0;
+  // 检查所有数值区间筛选输入
+  const filterIds = [
+    'priceMin', 'priceMax', 'premiumMin', 'premiumMax',
+    'convertValueMin', 'convertValueMax', 'ytmMin', 'ytmMax',
+    'remainYearsMin', 'remainYearsMax', 'remainScaleMin', 'remainScaleMax',
+    'issueScaleMin', 'issueScaleMax', 'stockPriceMin', 'stockPriceMax',
+    'stockPbMin', 'stockPbMax', 'stockMarketCapMin', 'stockMarketCapMax'
+  ];
+  filterIds.forEach(id => {
+    const el = document.getElementById(id);
+    if (el && el.value) count++;
+  });
+
+  // 检查上市时间
+  if (document.getElementById('listingDateMin')?.value) count++;
+  if (document.getElementById('listingDateMax')?.value) count++;
+
+  // 检查市场选择
+  const marketRadio = document.querySelector('input[name="marketFilter"]:checked');
+  if (marketRadio && marketRadio.value !== 'all') count++;
+
+  // 检查信用评级
+  if (_selectedRatings.size > 0) count++;
+
+  // 检查状态
+  const delistRadio = document.querySelector('input[name="delistFilter"]:checked');
+  if (delistRadio && delistRadio.value !== 'active') count++;
+
+  // 检查复选框
+  ['filterStrongRedeem', 'filterNearStrongRedeem', 'filterPutback', 'filterNearPutback'].forEach(id => {
+    const el = document.getElementById(id);
+    if (el && el.checked) count++;
+  });
+
+  // 更新显示
+  const countEl = document.getElementById('filterCount');
+  if (countEl) {
+    countEl.textContent = count > 0 ? count : '';
+    countEl.style.display = count > 0 ? 'inline-flex' : 'none';
+  }
 }
 
 // 排序函数
@@ -224,7 +421,14 @@ function renderBondList(bonds) {
   const hasPrice      = '债现价' in sample;
   const hasRating     = '信用评级' in sample;
 const hasRemain     = '剩余规模' in sample;
+  const hasIssueSize  = '发行规模' in sample;
   const hasStockPrice = '正股价' in sample;
+  const hasConvertValue = '转股价值' in sample;
+  const hasYTM        = '到期收益率' in sample;
+  const hasStockPB    = '正股PB' in sample;
+  const hasStockMarketCap = '正股市值' in sample;
+  const hasStrongRedeem = '强赎状态' in sample;
+  const hasPutback    = '回售状态' in sample;
   const hasListingDate = '上市日期' in sample;
   const hasDelistDate  = '退市日期' in sample;
   const hasExpireDate  = '到期日期' in sample;
@@ -279,9 +483,16 @@ const hasRemain     = '剩余规模' in sample;
   if (hasPrice)       thead += `<th class="num sortable" onclick="sortList('债现价')">债现价${_sortIcon('债现价')}</th>`;
   if (showRemainYears) thead += `<th class="num sortable" onclick="sortList('到期日期')">剩余年限${_sortIcon('到期日期')}</th>`;
   if (hasStockPrice)  thead += '<th class="num">正股价</th>';
+  if (hasConvertValue) thead += `<th class="num sortable" onclick="sortList('转股价值')">转股价值${_sortIcon('转股价值')}</th>`;
   if (hasPremium)     thead += `<th class="num sortable" onclick="sortList('转股溢价率')">转股溢价率${_sortIcon('转股溢价率')}</th>`;
+  if (hasYTM)        thead += `<th class="num sortable" onclick="sortList('到期收益率')">到期收益率${_sortIcon('到期收益率')}</th>`;
   if (hasRating)      thead += `<th class="center sortable" onclick="sortList('信用评级')">信用评级${_sortIcon('信用评级')}</th>`;
   if (hasRemain)      thead += `<th class="num sortable" onclick="sortList('剩余规模')">剩余规模(亿)${_sortIcon('剩余规模')}</th>`;
+  if (hasIssueSize)   thead += `<th class="num sortable" onclick="sortList('发行规模')">发行规模(亿)${_sortIcon('发行规模')}</th>`;
+  if (hasStockPB)     thead += `<th class="num sortable" onclick="sortList('正股PB')">正股PB${_sortIcon('正股PB')}</th>`;
+  if (hasStockMarketCap) thead += `<th class="num sortable" onclick="sortList('正股市值')">正股市值(亿)${_sortIcon('正股市值')}</th>`;
+  if (hasStrongRedeem) thead += `<th class="center">强赎状态</th>`;
+  if (hasPutback)    thead += `<th class="center">回售状态</th>`;
   if (hasListingDate) thead += `<th class="center sortable" onclick="sortList('上市日期')">上市日期${_sortIcon('上市日期')}</th>`;
   if (hasDelistDate)  thead += `<th class="center sortable" onclick="sortList('退市日期')">退市日期${_sortIcon('退市日期')}</th>`;
   thead += '</tr>';
@@ -328,6 +539,10 @@ const hasRemain     = '剩余规模' in sample;
       const sp = b['正股价'] != null ? parseFloat(b['正股价']).toFixed(3) : '-';
       row += `<td class="num">${sp}</td>`;
     }
+    if (hasConvertValue) {
+      const cv = b['转股价值'] != null ? parseFloat(b['转股价值']).toFixed(2) : '-';
+      row += `<td class="num">${cv}</td>`;
+    }
     if (hasPremium) {
       const pv = b['转股溢价率'];
       if (pv != null) {
@@ -339,6 +554,10 @@ const hasRemain     = '剩余规模' in sample;
         row += '<td class="num">-</td>';
       }
     }
+    if (hasYTM) {
+      const ytm = b['到期收益率'] != null ? parseFloat(b['到期收益率']).toFixed(2) : '-';
+      row += `<td class="num">${ytm}</td>`;
+    }
     if (hasRating) {
       const r = _pureRating(b['信用评级']) || '-';
       row += `<td class="center"><span class="rating-tag">${r}</span></td>`;
@@ -346,6 +565,26 @@ const hasRemain     = '剩余规模' in sample;
     if (hasRemain) {
 const rv = b['剩余规模'] != null ? parseFloat(b['剩余规模']).toFixed(2) : '-';
       row += `<td class="num">${rv}</td>`;
+    }
+    if (hasIssueSize) {
+      const iv = b['发行规模'] != null ? parseFloat(b['发行规模']).toFixed(2) : '-';
+      row += `<td class="num">${iv}</td>`;
+    }
+    if (hasStockPB) {
+      const pb = b['正股PB'] != null ? parseFloat(b['正股PB']).toFixed(2) : '-';
+      row += `<td class="num">${pb}</td>`;
+    }
+    if (hasStockMarketCap) {
+      const mc = b['正股市值'] != null ? parseFloat(b['正股市值']).toFixed(2) : '-';
+      row += `<td class="num">${mc}</td>`;
+    }
+    if (hasStrongRedeem) {
+      const sr = b['强赎状态'] || '-';
+      row += `<td class="center">${sr}</td>`;
+    }
+    if (hasPutback) {
+      const pp = b['回售状态'] || '-';
+      row += `<td class="center">${pp}</td>`;
     }
     if (hasListingDate) {
       const ld = b['上市日期'] || '-';
@@ -369,4 +608,99 @@ const rv = b['剩余规模'] != null ? parseFloat(b['剩余规模']).toFixed(2) 
         <tbody>${tbody}</tbody>
       </table>
     </div>`;
+}
+
+// ── 快捷策略筛选 ────────────────────────────────────────────────────
+function setQuickFilter(preset) {
+  // 先重置所有可变数字输入框
+  ['priceMin','priceMax','premiumMin','premiumMax','convertValueMin','convertValueMax',
+   'ytmMin','ytmMax','remainYearsMin','remainYearsMax',
+   'remainScaleMin','remainScaleMax','issueScaleMin','issueScaleMax',
+   'stockPriceMin','stockPriceMax','stockPbMin','stockPbMax',
+   'stockMarketCapMin','stockMarketCapMax'].forEach(id => {
+    const el = document.getElementById(id);
+    if (el) el.value = '';
+  });
+  // 重置上市时间
+  const ldm = document.getElementById('listingDateMin');
+  const ldx = document.getElementById('listingDateMax');
+  if (ldm) ldm.value = '';
+  if (ldx) ldx.value = '';
+  // 重置市场为全部
+  const allMarketRadio = document.querySelector('input[name="marketFilter"][value="all"]');
+  if (allMarketRadio) allMarketRadio.checked = true;
+  // 保证"状态"为在市（快捷策略只针对在市债券）
+  const activeRadio = document.querySelector('input[name="delistFilter"][value="active"]');
+  if (activeRadio) { activeRadio.checked = true; _delistFilter = 'active'; }
+
+  switch (preset) {
+    case 'sub100':
+      // 破面：债现价 < 100
+      document.getElementById('priceMax').value = '100';
+      break;
+    case 'low_price':
+      // 低价债：100 ~ 110
+      document.getElementById('priceMin').value = '100';
+      document.getElementById('priceMax').value = '110';
+      break;
+    case 'low_premium':
+      // 低溢价：转股溢价率 < 20%
+      document.getElementById('premiumMax').value = '20';
+      break;
+    case 'double_low':
+      // 双低策略：债现价 < 120 且 转股溢价率 < 30%
+      document.getElementById('priceMax').value = '120';
+      document.getElementById('premiumMax').value = '30';
+      break;
+    case 'expire_soon':
+      // 到期≤2年
+      document.getElementById('remainYearsMax').value = '2';
+      break;
+    case 'small_scale':
+      // 小盘债：剩余规模 < 3亿
+      document.getElementById('remainScaleMax').value = '3';
+      break;
+    case 'large_scale':
+      // 大盘债：剩余规模 ≥ 10亿
+      document.getElementById('remainScaleMin').value = '10';
+      break;
+  }
+  // 高亮当前激活的快捷按钮
+  document.querySelectorAll('.quick-filter-btn:not(.reset-btn)').forEach(btn => btn.classList.remove('active'));
+  event.currentTarget.classList.add('active');
+  filterList();
+}
+
+// ── 重置所有筛选条件 ─────────────────────────────────────────────────
+function resetFilters() {
+  document.getElementById('listSearch').value = '';
+  ['priceMin','priceMax','premiumMin','premiumMax','convertValueMin','convertValueMax',
+   'ytmMin','ytmMax','remainYearsMin','remainYearsMax',
+   'remainScaleMin','remainScaleMax','issueScaleMin','issueScaleMax',
+   'stockPriceMin','stockPriceMax','stockPbMin','stockPbMax',
+   'stockMarketCapMin','stockMarketCapMax'].forEach(id => {
+    const el = document.getElementById(id);
+    if (el) el.value = '';
+  });
+  // 重置上市时间
+  const ldm = document.getElementById('listingDateMin');
+  const ldx = document.getElementById('listingDateMax');
+  if (ldm) ldm.value = '';
+  if (ldx) ldx.value = '';
+  // 重置市场为全部
+  const allMarketRadio2 = document.querySelector('input[name="marketFilter"][value="all"]');
+  if (allMarketRadio2) allMarketRadio2.checked = true;
+  // 重置状态为"在市"
+  const activeRadio = document.querySelector('input[name="delistFilter"][value="active"]');
+  if (activeRadio) { activeRadio.checked = true; _delistFilter = 'active'; }
+  // 清除评级选择
+  clearRatingFilter();
+  // 清除复选框
+  ['filterStrongRedeem', 'filterNearStrongRedeem', 'filterPutback', 'filterNearPutback'].forEach(id => {
+    const el = document.getElementById(id);
+    if (el) el.checked = false;
+  });
+  // 取消快捷按钮高亮
+  document.querySelectorAll('.quick-filter-btn').forEach(btn => btn.classList.remove('active'));
+  filterList();
 }

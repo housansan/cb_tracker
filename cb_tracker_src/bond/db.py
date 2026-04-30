@@ -36,6 +36,7 @@ CREATE TABLE IF NOT EXISTS t_bond_info (
     stock_name       VARCHAR(20),                                           -- 正股简称
     conv_price       INTEGER UNSIGNED,                                      -- 转股价×100（元），如10.25→1025
     issue_size       INTEGER UNSIGNED,                                      -- 剩余规模×100（亿元），如8.00→800
+    issue_size_original INTEGER UNSIGNED,                                   -- 发行规模×100（亿元）
     credit_rating    SMALLINT UNSIGNED,                                     -- 信用评级编码，AAA=700，C=50，未知=0
     listing_date     TIMESTAMP,                                             -- 上市日期
     delist_date      TIMESTAMP,                                             -- 退市日期，NULL=在途
@@ -45,11 +46,27 @@ CREATE TABLE IF NOT EXISTS t_bond_info (
     coupon_rate_desc VARCHAR(500),                                          -- 利率说明原文
     coupon_rates     VARCHAR(200),                                          -- 各年票息率 JSON数组字符串
     coupon_pay_dates VARCHAR(500),                                          -- 付息日列表 JSON数组字符串
+    strong_redeem_status VARCHAR(20),                                      -- 强赎状态：强赎中/临近强赎/无
+    putback_status  VARCHAR(20),                                          -- 回售状态：回售中/临近回售/无
     created_at       TIMESTAMP         NOT NULL DEFAULT CURRENT_TIMESTAMP,  -- 首次入库时间
     updated_at       TIMESTAMP         NOT NULL DEFAULT CURRENT_TIMESTAMP   -- 最后更新时间
 );
 
 CREATE UNIQUE INDEX IF NOT EXISTS uk_bond_code ON t_bond_info (bond_code);
+"""
+
+# ── 正股财务 DDL ──────────────────────────────────────────────────────────────
+
+_DDL_STOCK_FINANCIALS = """
+CREATE TABLE IF NOT EXISTS t_stock_financials (
+    id            INTEGER           NOT NULL PRIMARY KEY AUTOINCREMENT,
+    stock_code    VARCHAR(10)       NOT NULL UNIQUE,   -- 正股代码（如 600519）
+    profile_json  TEXT,                                -- 公司档案 JSON
+    annual_json   TEXT,                                -- 年度财务 JSON（近4年）
+    quarterly_json TEXT,                               -- 季度财务 JSON（近4季度）
+    created_at    TIMESTAMP         NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at    TIMESTAMP         NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
 """
 
 # ── 信用评级编码映射 ──────────────────────────────────────────────────────────
@@ -116,34 +133,74 @@ def init_db(db_dir: str) -> None:
 
     _conn.executescript(_DDL_BOND_INFO)
     _conn.executescript(_DDL_BOND_DAILY)
+    _conn.executescript(_DDL_STOCK_DAILY)
+    _conn.executescript(_DDL_STOCK_FINANCIALS)
 
-    # 在线迁移：为已有 DB 追加新列（兼容低版本 SQLite，不使用 IF NOT EXISTS）
-    existing_cols = {
+    # ── 在线迁移：t_bond_daily ───────────────────────────────────────────────
+    daily_cols = {
         row[1]
         for row in _conn.execute("PRAGMA table_info(t_bond_daily)").fetchall()
     }
     for col_name, col_def in [
         ("issue_size", "ALTER TABLE t_bond_daily ADD COLUMN issue_size INTEGER UNSIGNED"),
-        ("stock_close", "ALTER TABLE t_bond_daily ADD COLUMN stock_close INTEGER UNSIGNED"),
     ]:
-        if col_name not in existing_cols:
+        if col_name not in daily_cols:
             try:
                 _conn.execute(col_def)
             except Exception as e:
                 logger.warning("[db] 添加列 %s 失败：%s", col_name, e)
 
-    # 在线迁移：t_bond_info 从 redeem_price（整数存储解析结果）迁移到
-    # redeem_clause（保存原始文本，读取时实时解析）
+    # ── 在线迁移：t_bond_info ────────────────────────────────────────────────
     bond_info_cols = {
         row[1]
         for row in _conn.execute("PRAGMA table_info(t_bond_info)").fetchall()
     }
+    
+    # 迁移：添加 redeem_clause 列
     if "redeem_clause" not in bond_info_cols:
         try:
             _conn.execute("ALTER TABLE t_bond_info ADD COLUMN redeem_clause VARCHAR(500)")
             logger.info("[db] 迁移：t_bond_info 新增 redeem_clause 列")
         except Exception as e:
             logger.warning("[db] 添加列 redeem_clause 失败：%s", e)
+    
+    # 迁移：添加 t_bond_info 静态字段列
+    _BOND_INFO_NEW_COLUMNS = [
+        ("issue_size_original", "INTEGER UNSIGNED"),
+        ("strong_redeem_status", "VARCHAR(20)"),
+        ("putback_status", "VARCHAR(20)"),
+    ]
+    
+    for col_name, col_def in _BOND_INFO_NEW_COLUMNS:
+        if col_name not in bond_info_cols:
+            try:
+                _conn.execute(f"ALTER TABLE t_bond_info ADD COLUMN {col_name} {col_def}")
+                logger.info("[db] 迁移：t_bond_info 新增 %s 列", col_name)
+            except Exception as e:
+                logger.warning("[db] 添加列 %s 失败：%s", col_name, e)
+    
+    # 清理：t_bond_daily 中已移除的正股字段（如果旧库还有，忽略即可）
+    # stock_close / stock_pb / stock_market_cap 已从 DDL 移除，
+    # 旧表若仍有这些列不影响运行，后续可用 VACUUM 重建
+    
+    # ── 在线迁移：t_stock_daily ──────────────────────────────────────────────
+    stock_daily_cols = {
+        row[1]
+        for row in _conn.execute("PRAGMA table_info(t_stock_daily)").fetchall()
+    }
+    _STOCK_DAILY_NEW_COLUMNS = [
+        ("stock_close", "INTEGER UNSIGNED"),
+        ("stock_pb", "DECIMAL(10,4)"),
+        ("stock_market_cap", "DECIMAL(16,4)"),
+    ]
+    for col_name, col_def in _STOCK_DAILY_NEW_COLUMNS:
+        if col_name not in stock_daily_cols:
+            try:
+                _conn.execute(f"ALTER TABLE t_stock_daily ADD COLUMN {col_name} {col_def}")
+                logger.info("[db] 迁移：t_stock_daily 新增 %s 列", col_name)
+            except Exception as e:
+                logger.warning("[db] 添加列 %s 失败：%s", col_name, e)
+    
     _conn.commit()
 
     logger.info(f"[db] 数据库已初始化：{db_path}")
@@ -170,9 +227,10 @@ def close_db() -> None:
 # upsert 时需要更新的字段（排除 id / bond_code / created_at）
 _UPSERT_FIELDS = [
     "bond_name", "stock_code", "stock_name",
-    "conv_price", "issue_size", "credit_rating",
+    "conv_price", "issue_size", "issue_size_original", "credit_rating",
     "listing_date", "delist_date", "value_date", "expire_date",
     "redeem_clause", "coupon_rate_desc", "coupon_rates", "coupon_pay_dates",
+    "strong_redeem_status", "putback_status",
     "updated_at",
 ]
 
@@ -377,6 +435,14 @@ def bond_info_to_db_row(info: dict) -> Optional[dict]:
     # 剩余规模：get_bond_info 返回的是剩余规模（亿元浮点），×100 存为整数
     issue_size = _to_int_price(info.get("剩余规模"))
 
+    def _to_decimal(val) -> Optional[float]:
+        """将浮点值转换为 DECIMAL，None/0 返回 None"""
+        try:
+            v = float(val)
+            return round(v, 4) if v else None
+        except (TypeError, ValueError):
+            return None
+
     return {
         "bond_code":        int(bond_code_str),
         "bond_name":        str(info.get("债券简称") or ""),
@@ -384,6 +450,7 @@ def bond_info_to_db_row(info: dict) -> Optional[dict]:
         "stock_name":       str(info.get("正股简称") or ""),
         "conv_price":       _to_int_price(info.get("转股价")),
         "issue_size":       issue_size,
+        "issue_size_original": _to_int_price(info.get("发行规模")),
         "credit_rating":    encode_credit_rating(info.get("信用评级")),
         "listing_date":     _date_to_ts(info.get("上市日期")),
         "delist_date":      _date_to_ts(info.get("退市日期")),
@@ -393,6 +460,8 @@ def bond_info_to_db_row(info: dict) -> Optional[dict]:
         "coupon_rate_desc": coupon_info.get("利率说明") or "",
         "coupon_rates":     json.dumps(coupon_info.get("票息率列表") or [], ensure_ascii=False),
         "coupon_pay_dates": json.dumps(coupon_info.get("付息日列表") or [], ensure_ascii=False),
+        "strong_redeem_status": info.get("强赎状态") or "",
+        "putback_status":  info.get("回售状态") or "",
     }
 
 
@@ -418,6 +487,14 @@ def bond_list_row_to_db_row(row: dict) -> Optional[dict]:
         except (TypeError, ValueError):
             return None
 
+    def _to_decimal(val) -> Optional[float]:
+        """将浮点值转换为 DECIMAL，None/0 返回 None"""
+        try:
+            v = float(val)
+            return round(v, 4) if v else None
+        except (TypeError, ValueError):
+            return None
+
     return {
         "bond_code":        int(bond_code_str),
         "bond_name":        str(row.get("债券简称") or ""),
@@ -425,6 +502,7 @@ def bond_list_row_to_db_row(row: dict) -> Optional[dict]:
         "stock_name":       str(row.get("正股简称") or ""),
         "conv_price":       _to_int_price(row.get("转股价")),
         "issue_size":       _to_int_price(row.get("剩余规模")),
+        "issue_size_original": _to_int_price(row.get("发行规模")),
         "credit_rating":    encode_credit_rating(row.get("信用评级")),
         # 以下字段列表接口不提供，填 None（upsert 时不覆盖已有值）
         "listing_date":     None,
@@ -435,6 +513,8 @@ def bond_list_row_to_db_row(row: dict) -> Optional[dict]:
         "coupon_rate_desc": None,
         "coupon_rates":     None,
         "coupon_pay_dates": None,
+        "strong_redeem_status": row.get("强赎状态") or "",
+        "putback_status":  row.get("回售状态") or "",
     }
 
 
@@ -511,17 +591,22 @@ def db_row_to_bond_info(row: dict) -> dict:
         "债券代码":   str(row.get("bond_code", "")),
         "债券简称":   row.get("bond_name") or "",
         "债现价":     None,   # 实时价格不存 DB
-        "正股代码":   str(row.get("stock_code") or ""),
+        "正股代码":   str(row.get("stock_code") or "").zfill(6) if row.get("stock_code") else "",
         "正股简称":   row.get("stock_name") or "",
         "正股价":     None,   # 实时价格不存 DB
         "转股溢价率": None,   # 实时数据不存 DB
         "转股价":     _from_int_price(row.get("conv_price")),
-        "转股价值":   None,
+        "转股价值":   None,   # 实时计算：正股价 / 转股价 * 100
         "信用评级":   decode_credit_rating(row.get("credit_rating")),
         "剩余规模":   _from_int_price(row.get("issue_size")),
+        "发行规模":   _from_int_price(row.get("issue_size_original")),
         "剩余年限":   remaining_years,
         "上市日期":   _ts_to_date(row.get("listing_date")),
         "退市日期":   _ts_to_date(row.get("delist_date")),
+        "正股PB":     None,   # 高频变动字段，从 t_bond_daily 读取
+        "正股市值":   None,   # 高频变动字段，从 t_bond_daily 读取
+        "强赎状态":   row.get("strong_redeem_status") or "",
+        "回售状态":   row.get("putback_status") or "",
         "付息信息":   coupon_info,
     }
 
@@ -566,7 +651,6 @@ CREATE TABLE IF NOT EXISTS t_bond_daily (
     conv_value           INTEGER UNSIGNED,   -- 转股价值×100（元）
     double_low           INTEGER UNSIGNED,   -- 双低值×100（= 收盘价 + 溢价率×100）
     issue_size           INTEGER UNSIGNED,   -- 剩余规模×100（亿元）
-    stock_close          INTEGER UNSIGNED,   -- 正股收盘价×100（元）
 
     -- ── 元数据 ────────────────────────────────────────────────────
     created_at           TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
@@ -588,14 +672,52 @@ END;
 """
 
 
+# ── t_stock_daily DDL ─────────────────────────────────────────────────────────
+
+_DDL_STOCK_DAILY = """
+CREATE TABLE IF NOT EXISTS t_stock_daily (
+    id                   INTEGER   NOT NULL PRIMARY KEY AUTOINCREMENT,  -- 自增主键
+    stock_code           INTEGER UNSIGNED NOT NULL,                     -- 正股代码
+    trade_date           TIMESTAMP NOT NULL,                            -- 交易日期
+
+    stock_close          INTEGER UNSIGNED,   -- 正股收盘价×100（元）
+    stock_pb             DECIMAL(10,4),      -- 正股PB
+    stock_market_cap     DECIMAL(16,4),      -- 正股市值（亿元）
+
+    created_at           TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at           TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+
+    UNIQUE (stock_code, trade_date)
+);
+
+CREATE INDEX IF NOT EXISTS idx_stock_daily_stock_code  ON t_stock_daily (stock_code);
+CREATE INDEX IF NOT EXISTS idx_stock_daily_trade_date ON t_stock_daily (trade_date);
+
+CREATE TRIGGER IF NOT EXISTS trg_stock_daily_updated_at
+AFTER UPDATE ON t_stock_daily
+FOR EACH ROW
+BEGIN
+    UPDATE t_stock_daily SET updated_at = CURRENT_TIMESTAMP WHERE id = OLD.id;
+END;
+"""
+
+
 # ── t_bond_daily CRUD ─────────────────────────────────────────────────────────
 
 _DAILY_UPSERT_FIELDS = [
     "open", "high", "low", "close", "volume", "amount",
     "conv_premium_rate", "ytm", "conv_value", "double_low",
-    "issue_size", "stock_close",
+    "issue_size",
     "updated_at",
 ]
+
+# ── t_stock_daily CRUD ────────────────────────────────────────────────────────
+
+_STOCK_DAILY_UPSERT_FIELDS = [
+    "stock_close", "stock_pb", "stock_market_cap",
+    "updated_at",
+]
+_STOCK_DAILY_INSERT_FIELDS = ["stock_code", "trade_date"] + _STOCK_DAILY_UPSERT_FIELDS
 _DAILY_INSERT_FIELDS = ["bond_code", "trade_date"] + _DAILY_UPSERT_FIELDS
 
 
@@ -747,6 +869,96 @@ def count_daily(bond_code: Optional[int] = None) -> int:
     return row[0] if row else 0
 
 
+# ── t_stock_daily CRUD ────────────────────────────────────────────────────────
+
+def upsert_stock_daily(data: dict) -> None:
+    """插入或更新一条正股日线记录（以 stock_code + trade_date 为唯一键）。"""
+    import datetime
+    conn = get_conn()
+    data = dict(data)
+    data["updated_at"] = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+
+    placeholders = ", ".join(f":{f}" for f in _STOCK_DAILY_INSERT_FIELDS)
+    update_clause = ", ".join(f"{f}=excluded.{f}" for f in _STOCK_DAILY_UPSERT_FIELDS)
+    sql = f"""
+        INSERT INTO t_stock_daily ({', '.join(_STOCK_DAILY_INSERT_FIELDS)})
+        VALUES ({placeholders})
+        ON CONFLICT(stock_code, trade_date) DO UPDATE SET {update_clause}
+    """
+    conn.execute(sql, data)
+    conn.commit()
+
+
+def upsert_stock_daily_batch(data_list: list[dict]) -> int:
+    """批量 upsert 正股日线记录，返回处理条数。"""
+    import datetime
+    conn = get_conn()
+    now = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+
+    placeholders = ", ".join(f":{f}" for f in _STOCK_DAILY_INSERT_FIELDS)
+    update_clause = ", ".join(f"{f}=excluded.{f}" for f in _STOCK_DAILY_UPSERT_FIELDS)
+    sql = f"""
+        INSERT INTO t_stock_daily ({', '.join(_STOCK_DAILY_INSERT_FIELDS)})
+        VALUES ({placeholders})
+        ON CONFLICT(stock_code, trade_date) DO UPDATE SET {update_clause}
+    """
+
+    rows = []
+    for d in data_list:
+        row = dict(d)
+        row["updated_at"] = now
+        rows.append(row)
+
+    conn.executemany(sql, rows)
+    conn.commit()
+    logger.info(f"[db] upsert_stock_daily_batch: 处理 {len(rows)} 条记录")
+    return len(rows)
+
+
+def query_latest_stock_snapshot() -> dict[int, dict]:
+    """
+    查询每只正股的最新日度数据（以 trade_date 最新为准）。
+    返回: {stock_code: {stock_pb, stock_market_cap, stock_close, ...}}
+    """
+    conn = get_conn()
+    sql = """
+        SELECT s.*
+        FROM t_stock_daily s
+        INNER JOIN (
+            SELECT stock_code, MAX(trade_date) AS max_date
+            FROM t_stock_daily
+            GROUP BY stock_code
+        ) latest ON s.stock_code = latest.stock_code AND s.trade_date = latest.max_date
+    """
+    rows = conn.execute(sql).fetchall()
+    result = {}
+    for r in rows:
+        result[r["stock_code"]] = dict(r)
+    return result
+
+
+def query_latest_daily_snapshot() -> dict[int, dict]:
+    """
+    查询每只债券的最新日度数据（以 trade_date 最新为准）。
+    返回: {bond_code: {stock_pb, stock_market_cap, ...}}
+    """
+    conn = get_conn()
+    sql = """
+        SELECT d.*
+        FROM t_bond_daily d
+        INNER JOIN (
+            SELECT bond_code, MAX(trade_date) AS max_date
+            FROM t_bond_daily
+            GROUP BY bond_code
+        ) latest ON d.bond_code = latest.bond_code AND d.trade_date = latest.max_date
+    """
+    rows = conn.execute(sql).fetchall()
+    result = {}
+    for r in rows:
+        result[r["bond_code"]] = dict(r)
+    return result
+
+
 def history_df_to_daily_rows(bond_code: str, df) -> list:
     """
     将 get_convertible_bond_history() 返回的 DataFrame 转换为
@@ -807,6 +1019,47 @@ def history_df_to_daily_rows(bond_code: str, df) -> list:
             "conv_value":        _to_int_safe(r.get("转股价值"), 100),
             "double_low":        double_low,
             "issue_size":        _to_int_safe(r.get("剩余规模"), 100),
-            "stock_close":       _to_int_safe(r.get("正股收盘价"), 100),
         })
     return rows
+
+
+# ── 正股财务 CRUD ──────────────────────────────────────────────────────────────
+
+def upsert_stock_financials(stock_code: str, profile_json: str, annual_json: str, quarterly_json: str) -> None:
+    """
+    插入或更新正股财务数据（以 stock_code 为唯一键）。
+    """
+    import datetime as _dt
+    now = _dt.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    conn = get_conn()
+    conn.execute("""
+        INSERT INTO t_stock_financials (stock_code, profile_json, annual_json, quarterly_json, updated_at)
+        VALUES (:stock_code, :profile_json, :annual_json, :quarterly_json, :updated_at)
+        ON CONFLICT(stock_code) DO UPDATE SET
+            profile_json   = excluded.profile_json,
+            annual_json    = excluded.annual_json,
+            quarterly_json = excluded.quarterly_json,
+            updated_at     = excluded.updated_at
+    """, {
+        "stock_code":    stock_code,
+        "profile_json":  profile_json,
+        "annual_json":   annual_json,
+        "quarterly_json": quarterly_json,
+        "updated_at":    now,
+    })
+    conn.commit()
+
+
+def query_stock_financials(stock_code: str) -> Optional[dict]:
+    """
+    查询正股财务缓存，返回 {profile_json, annual_json, quarterly_json, updated_at} 或 None。
+    """
+    conn = get_conn()
+    row = conn.execute(
+        "SELECT profile_json, annual_json, quarterly_json, updated_at "
+        "FROM t_stock_financials WHERE stock_code = ?",
+        (stock_code,)
+    ).fetchone()
+    if row is None:
+        return None
+    return dict(row)
