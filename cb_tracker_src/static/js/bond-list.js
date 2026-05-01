@@ -5,7 +5,10 @@ let _selectedRatings = new Set(); // 已选中的信用评级
 let _sortKey = null;   // 当前排序字段
 let _sortDir = 'asc';  // 'asc' | 'desc'
 let _delistFilter = 'active'; // 'active' | 'delisted' | 'pending' | 'all'
-let _freezeCols = 2; // 冻结前几列：0 | 1 | 2
+let _freezeCols = 3; // 冻结前几列：0 | 1 | 2 | 3
+
+let _positions = [];
+let _alerts = [];
 
 // 切换筛选面板显示/隐藏
 function toggleFilterPanel() {
@@ -15,38 +18,56 @@ function toggleFilterPanel() {
   btn.classList.toggle('active');
 }
 async function loadBondList() {
-  document.getElementById('listContent').innerHTML = '<div class="list-loading">正在加载可转债列表...</div>';
+  console.log('[bond-list.js] loadBondList 开始执行');
+  const listContentEl = document.getElementById('listContent');
+  console.log('[bond-list.js] 获取 listContent 元素:', listContentEl);
+  listContentEl.innerHTML = '<div class="list-loading">正在加载可转债列表...</div>';
   try {
+    console.log('[bond-list.js] 开始请求 /api/bond_list 接口');
     const res  = await fetch('/api/bond_list');
+    console.log('[bond-list.js] 接口响应状态:', res.status);
     const json = await res.json();
+    console.log('[bond-list.js] 接口返回数据:', { success: json.success, dataLength: json.data?.length, pending_fill: json.pending_fill });
     if (!json.success) {
-      document.getElementById('listContent').innerHTML = `<div style="color:#c62828;padding:24px">⚠ ${json.message}</div>`;
+      const errorMsg = `⚠ ${json.message}`;
+      console.error('[bond-list.js] 接口返回失败:', json.message);
+      listContentEl.innerHTML = `<div style="color:#c62828;padding:24px">${errorMsg}</div>`;
       return;
     }
     _allBonds = json.data;
+    console.log('[bond-list.js] 已加载债券数据条数:', _allBonds.length);
+    console.log('[bond-list.js] 开始构建评级选项');
     _buildRatingOptions(_allBonds);
+    console.log('[bond-list.js] 开始执行 filterList');
     filterList(); // 应用默认过滤（在市）后再渲染
     // 后台有补全任务时，分两次静默刷新（补全完后缓存会清除）
     if (json.pending_fill) {
+      console.log('[bond-list.js] 检测到待补全数据，将定时刷新');
       // 第一次：35s 后刷（补全快的数据已写入）
       // 第二次：150s 后再刷（全部补全完）
       [35000, 150000].forEach(delay => {
         setTimeout(() => {
+          console.log(`[bond-list.js] 定时刷新债券列表，延迟: ${delay}ms`);
           fetch('/api/bond_list?_bust=' + Date.now())
             .then(r => r.json())
             .then(j => {
               if (j.success && j.data) {
+                console.log('[bond-list.js] 定时刷新完成，新数据条数:', j.data.length);
                 _allBonds = j.data;
                 _buildRatingOptions(_allBonds);
                 filterList();
               }
             })
-            .catch(() => {});
+            .catch((err) => {
+              console.error('[bond-list.js] 定时刷新失败:', err);
+            });
         }, delay);
       });
     }
+    console.log('[bond-list.js] loadBondList 执行完成');
   } catch(e) {
-    document.getElementById('listContent').innerHTML = `<div style="color:#c62828;padding:24px">⚠ 加载失败：${e.message}</div>`;
+    console.error('[bond-list.js] 加载债券列表失败:', e);
+    listContentEl.innerHTML = `<div style="color:#c62828;padding:24px">⚠ 加载失败：${e.message}</div>`;
   }
 }
 
@@ -198,6 +219,15 @@ function filterList() {
       if (isNaN(convertValue)) return false;
       if (!isNaN(convertValueMin) && convertValue < convertValueMin) return false;
       if (!isNaN(convertValueMax) && convertValue > convertValueMax) return false;
+    }
+    // 双低值区间筛选
+    const doubleLowMin = parseFloat(document.getElementById('doubleLowMin').value);
+    const doubleLowMax = parseFloat(document.getElementById('doubleLowMax').value);
+    if (!isNaN(doubleLowMin) || !isNaN(doubleLowMax)) {
+      const dl = parseFloat(b['双低值']);
+      if (isNaN(dl)) return false;
+      if (!isNaN(doubleLowMin) && dl < doubleLowMin) return false;
+      if (!isNaN(doubleLowMax) && dl > doubleLowMax) return false;
     }
     // 到期收益率区间筛选
     const ytmMin = parseFloat(document.getElementById('ytmMin').value);
@@ -393,34 +423,46 @@ function _ratingWeight(r) {
 }
 
 function renderBondList(bonds) {
-  // 排序
-  let sorted = [...bonds];
-  if (_sortKey) {
-    sorted.sort((a, b) => {
-      let va, vb;
-      if (_sortKey === '信用评级') {
-        va = _ratingWeight(a['信用评级']);
-        vb = _ratingWeight(b['信用评级']);
-      } else {
-        va = parseFloat(a[_sortKey]);
-        vb = parseFloat(b[_sortKey]);
-        if (isNaN(va)) va = _sortDir === 'asc' ? Infinity : -Infinity;
-        if (isNaN(vb)) vb = _sortDir === 'asc' ? Infinity : -Infinity;
-      }
-      return _sortDir === 'asc' ? va - vb : vb - va;
-    });
-  }
+  console.log('[bond-list.js] renderBondList 开始执行，传入债券条数:', bonds?.length);
+  try {
+    // 排序
+    let sorted = [...bonds];
+    console.log('[bond-list.js] 开始排序，排序键:', _sortKey, '方向:', _sortDir);
+    if (_sortKey) {
+      sorted.sort((a, b) => {
+        let va, vb;
+        if (_sortKey === '信用评级') {
+          va = _ratingWeight(a['信用评级']);
+          vb = _ratingWeight(b['信用评级']);
+        } else {
+          va = parseFloat(a[_sortKey]);
+          vb = parseFloat(b[_sortKey]);
+          if (isNaN(va)) va = _sortDir === 'asc' ? Infinity : -Infinity;
+          if (isNaN(vb)) vb = _sortDir === 'asc' ? Infinity : -Infinity;
+        }
+        return _sortDir === 'asc' ? va - vb : vb - va;
+      });
+      console.log('[bond-list.js] 排序完成，前3条数据:', sorted.slice(0, 3));
+    }
 
-  document.getElementById('listCount').textContent = `共 ${bonds.length} 只`;
-  if (!bonds.length) {
-    document.getElementById('listContent').innerHTML = '<div style="color:#aaa;padding:24px;text-align:center">暂无数据</div>';
-    return;
-  }
+    const listCountEl = document.getElementById('listCount');
+    console.log('[bond-list.js] 获取 listCount 元素:', listCountEl);
+    listCountEl.textContent = `共 ${bonds.length} 只`;
+    
+    const listContentEl = document.getElementById('listContent');
+    console.log('[bond-list.js] 获取 listContent 元素:', listContentEl);
+    
+    if (!bonds.length) {
+      console.log('[bond-list.js] 债券列表为空，显示暂无数据');
+      listContentEl.innerHTML = '<div style="color:#aaa;padding:24px;text-align:center">暂无数据</div>';
+      return;
+    }
+    console.log('[bond-list.js] 开始生成表格 HTML');
   const sample = bonds[0];
   const hasPremium    = '转股溢价率' in sample;
   const hasPrice      = '债现价' in sample;
   const hasRating     = '信用评级' in sample;
-const hasRemain     = '剩余规模' in sample;
+  const hasRemain     = '剩余规模' in sample;
   const hasIssueSize  = '发行规模' in sample;
   const hasStockPrice = '正股价' in sample;
   const hasConvertValue = '转股价值' in sample;
@@ -432,6 +474,9 @@ const hasRemain     = '剩余规模' in sample;
   const hasListingDate = '上市日期' in sample;
   const hasDelistDate  = '退市日期' in sample;
   const hasExpireDate  = '到期日期' in sample;
+  const hasDoubleLow  = '双低值' in sample;
+  const hasRedeemProgress = '距离强赎线' in sample;
+  const hasXiuzheng   = '下修博弈' in sample;
   // 仅在市状态下显示剩余年限
   const showRemainYears = hasExpireDate && _delistFilter === 'active';
 
@@ -444,8 +489,8 @@ const hasRemain     = '剩余规模' in sample;
   }
 
   // 根据冻结列数生成 td 的 sticky 属性
-  // 列宽：债券代码=100px，债券名称=100px，正股代码=100px，正股名称=100px
-  const COL_WIDTHS = [100, 100, 100, 100]; // 前四列宽度
+  // 列宽：债券代码=88px，债券名称=90px，正股代码=130px
+  const COL_WIDTHS = [88, 90, 130]; // 前三列宽度
   function _frozenTdStyle(colIdx) {
     if (colIdx >= _freezeCols) return ' class="num"';
     const left = COL_WIDTHS.slice(0, colIdx).reduce((a, b) => a + b, 0);
@@ -485,6 +530,9 @@ const hasRemain     = '剩余规模' in sample;
   if (hasStockPrice)  thead += '<th class="num">正股价</th>';
   if (hasConvertValue) thead += `<th class="num sortable" onclick="sortList('转股价值')">转股价值${_sortIcon('转股价值')}</th>`;
   if (hasPremium)     thead += `<th class="num sortable" onclick="sortList('转股溢价率')">转股溢价率${_sortIcon('转股溢价率')}</th>`;
+  if (hasDoubleLow)   thead += `<th class="num sortable" onclick="sortList('双低值')">双低值${_sortIcon('双低值')}</th>`;
+  if (hasRedeemProgress) thead += `<th class="num">强赎进度</th>`;
+  if (hasXiuzheng)    thead += `<th class="center">下修博弈</th>`;
   if (hasYTM)        thead += `<th class="num sortable" onclick="sortList('到期收益率')">到期收益率${_sortIcon('到期收益率')}</th>`;
   if (hasRating)      thead += `<th class="center sortable" onclick="sortList('信用评级')">信用评级${_sortIcon('信用评级')}</th>`;
   if (hasRemain)      thead += `<th class="num sortable" onclick="sortList('剩余规模')">剩余规模(亿)${_sortIcon('剩余规模')}</th>`;
@@ -497,14 +545,16 @@ const hasRemain     = '剩余规模' in sample;
   if (hasDelistDate)  thead += `<th class="center sortable" onclick="sortList('退市日期')">退市日期${_sortIcon('退市日期')}</th>`;
   thead += '</tr>';
 
-  const tbody = sorted.map(b => {
+  console.log('[bond-list.js] 开始生成 tbody HTML，排序后数据条数:', sorted.length);
+  const tbody = sorted.map((b, index) => {
+    console.log(`[bond-list.js] 渲染第 ${index + 1} 条债券:`, b['债券代码'], b['债券简称']);
     const code = b['债券代码'] || '-';
     const name = b['债券简称'] || '-';
     const sc   = b['正股代码'] || '-';
     const sn   = b['正股简称'] || '-';
     let row = `<tr>
       <td${_frozenTdTextStyle(0)}><a class="bond-code-link" onclick="openDetail('${code}')">${code}</a></td>
-      <td${_frozenTdTextStyle(1)}>${name}</td>
+      <td${_frozenTdTextStyle(1)}>${name}${_positions.some(p => String(p.bond_code) === String(code)) ? '<span style="display:inline-block;width:6px;height:6px;border-radius:50%;background:#4caf50;margin-left:4px;vertical-align:middle"></span>' : ''}</td>
       <td${_frozenTdStyle(2)}>${sc}</td>
       <td${_frozenTdTextStyle(3)}>${sn}</td>`;
     if (hasPrice) {
@@ -554,6 +604,26 @@ const hasRemain     = '剩余规模' in sample;
         row += '<td class="num">-</td>';
       }
     }
+    if (hasDoubleLow) {
+      const dl = b['双低值'] != null ? parseFloat(b['双低值']).toFixed(2) : '-';
+      row += `<td class="num">${dl}</td>`;
+    }
+    if (hasRedeemProgress) {
+      const rp = b['距离强赎线'];
+      if (rp != null) {
+        const rpn = parseFloat(rp);
+        let rpc = '';
+        if (rpn >= 100) rpc = 'neg';
+        else if (rpn >= 90) rpc = 'pos';
+        row += `<td class="num"><span class="${rpc}">${rpn.toFixed(1)}%</span></td>`;
+      } else {
+        row += '<td class="num">-</td>';
+      }
+    }
+    if (hasXiuzheng) {
+      const xz = b['下修博弈'];
+      row += `<td class="center">${xz ? '<span class="pos">是</span>' : '-'}</td>`;
+    }
     if (hasYTM) {
       const ytm = b['到期收益率'] != null ? parseFloat(b['到期收益率']).toFixed(2) : '-';
       row += `<td class="num">${ytm}</td>`;
@@ -601,13 +671,37 @@ const rv = b['剩余规模'] != null ? parseFloat(b['剩余规模']).toFixed(2) 
     return row;
   }).join('');
 
-  document.getElementById('listContent').innerHTML = `
+  console.log('[bond-list.js] tbody HTML 生成完成，长度:', tbody.length);
+  console.log('[bond-list.js] thead HTML:', thead.substring(0, 200) + '...');
+  
+  const fullHtml = `
     <div class="bond-list-table-wrap">
       <table class="bond-list-table">
         <thead>${thead}</thead>
         <tbody>${tbody}</tbody>
       </table>
     </div>`;
+  
+  console.log('[bond-list.js] 准备设置 listContent 的 innerHTML，HTML 总长度:', fullHtml.length);
+  listContentEl.innerHTML = fullHtml;
+  console.log('[bond-list.js] listContent 的 innerHTML 设置完成');
+  console.log('[bond-list.js] 设置后 listContent 的子元素个数:', listContentEl.children.length);
+  
+  // 检查表格是否成功渲染
+  const tableEl = listContentEl.querySelector('.bond-list-table');
+  console.log('[bond-list.js] 查找表格元素:', tableEl);
+  if (tableEl) {
+    console.log('[bond-list.js] 表格行数:', tableEl.querySelectorAll('tr').length);
+  }
+  
+  console.log('[bond-list.js] renderBondList 执行完成');
+  } catch (e) {
+    console.error('[bond-list.js] renderBondList 执行出错:', e);
+    const listContentEl = document.getElementById('listContent');
+    if (listContentEl) {
+      listContentEl.innerHTML = `<div style="color:#c62828;padding:24px">渲染出错：${e.message}</div>`;
+    }
+  }
 }
 
 // ── 快捷策略筛选 ────────────────────────────────────────────────────
@@ -704,3 +798,5 @@ function resetFilters() {
   document.querySelectorAll('.quick-filter-btn').forEach(btn => btn.classList.remove('active'));
   filterList();
 }
+
+

@@ -20,9 +20,11 @@ logger = logging.getLogger(__name__)
 
 # 数据库文件名
 _DB_FILENAME = "bond.db"
+_USER_DB_FILENAME = "user.db"
 
 # 全局连接（懒初始化）
 _conn: Optional[sqlite3.Connection] = None
+_user_conn: Optional[sqlite3.Connection] = None
 
 
 # ── 建表 DDL ──────────────────────────────────────────────────────────────────
@@ -135,6 +137,7 @@ def init_db(db_dir: str) -> None:
     _conn.executescript(_DDL_BOND_DAILY)
     _conn.executescript(_DDL_STOCK_DAILY)
     _conn.executescript(_DDL_STOCK_FINANCIALS)
+    # 用户表（持仓/预警/笔记）已迁移至独立数据库，见 init_user_db()
 
     # ── 在线迁移：t_bond_daily ───────────────────────────────────────────────
     daily_cols = {
@@ -211,6 +214,32 @@ def get_conn() -> sqlite3.Connection:
     if _conn is None:
         raise RuntimeError("数据库未初始化，请先调用 init_db()")
     return _conn
+
+
+def init_user_db(db_dir: str) -> None:
+    """初始化用户数据库（持仓 / 预警 / 笔记）"""
+    global _user_conn
+
+    os.makedirs(db_dir, exist_ok=True)
+    db_path = os.path.join(db_dir, _USER_DB_FILENAME)
+
+    _user_conn = sqlite3.connect(db_path, check_same_thread=False)
+    _user_conn.row_factory = sqlite3.Row
+    _user_conn.execute("PRAGMA journal_mode=WAL")
+    _user_conn.execute("PRAGMA foreign_keys=ON")
+
+    _user_conn.executescript(_DDL_USER_BOND)
+    _user_conn.executescript(_DDL_ALERT)
+    _user_conn.commit()
+
+    logger.info(f"[db] 用户数据库已初始化：{db_path}")
+
+
+def get_user_conn() -> sqlite3.Connection:
+    """获取用户数据库连接"""
+    if _user_conn is None:
+        raise RuntimeError("用户数据库未初始化，请先调用 init_user_db()")
+    return _user_conn
 
 
 def close_db() -> None:
@@ -1063,3 +1092,168 @@ def query_stock_financials(stock_code: str) -> Optional[dict]:
     if row is None:
         return None
     return dict(row)
+
+
+# ── t_user_bond DDL（持仓 + 笔记）──────────────────────────────────────────────
+
+_DDL_USER_BOND = """
+CREATE TABLE IF NOT EXISTS t_user_bond (
+    id            INTEGER   NOT NULL PRIMARY KEY AUTOINCREMENT,
+    bond_code     INTEGER UNSIGNED NOT NULL UNIQUE,
+    bond_name     VARCHAR(20),
+    cost_price    DECIMAL(10,4),
+    quantity      INTEGER UNSIGNED,
+    note_content  TEXT,
+    created_at    TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at    TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+CREATE TRIGGER IF NOT EXISTS trg_user_bond_updated_at
+AFTER UPDATE ON t_user_bond
+FOR EACH ROW
+BEGIN
+    UPDATE t_user_bond SET updated_at = CURRENT_TIMESTAMP WHERE id = OLD.id;
+END;
+"""
+
+# ── t_alert DDL ───────────────────────────────────────────────────────────────
+
+_DDL_ALERT = """
+CREATE TABLE IF NOT EXISTS t_alert (
+    id            INTEGER   NOT NULL PRIMARY KEY AUTOINCREMENT,
+    bond_code     INTEGER UNSIGNED NOT NULL,
+    alert_type    VARCHAR(20) NOT NULL,
+    operator      VARCHAR(10) NOT NULL,
+    threshold     DECIMAL(10,4) NOT NULL,
+    enabled       INTEGER NOT NULL DEFAULT 1,
+    created_at    TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at    TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+CREATE TRIGGER IF NOT EXISTS trg_alert_updated_at
+AFTER UPDATE ON t_alert
+FOR EACH ROW
+BEGIN
+    UPDATE t_alert SET updated_at = CURRENT_TIMESTAMP WHERE id = OLD.id;
+END;
+"""
+
+# ── t_user_bond CRUD（持仓）────────────────────────────────────────────────────
+
+def upsert_position(bond_code: int, bond_name: str, cost_price: float, quantity: int) -> None:
+    import datetime as _dt
+    now = _dt.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    conn = get_user_conn()
+    conn.execute("""
+        INSERT INTO t_user_bond (bond_code, bond_name, cost_price, quantity, updated_at)
+        VALUES (:bond_code, :bond_name, :cost_price, :quantity, :updated_at)
+        ON CONFLICT(bond_code) DO UPDATE SET
+            bond_name  = excluded.bond_name,
+            cost_price = excluded.cost_price,
+            quantity   = excluded.quantity,
+            updated_at = excluded.updated_at
+    """, {"bond_code": bond_code, "bond_name": bond_name, "cost_price": cost_price,
+          "quantity": quantity, "updated_at": now})
+    conn.commit()
+
+
+def delete_position(bond_code: int) -> None:
+    conn = get_user_conn()
+    # 无笔记则删整条，有笔记则只清持仓字段
+    conn.execute("""
+        DELETE FROM t_user_bond
+        WHERE bond_code = ? AND (note_content IS NULL OR note_content = '')
+    """, (bond_code,))
+    conn.execute("""
+        UPDATE t_user_bond
+        SET cost_price = NULL, quantity = NULL, bond_name = NULL, updated_at = CURRENT_TIMESTAMP
+        WHERE bond_code = ?
+    """, (bond_code,))
+    conn.commit()
+
+
+def query_positions() -> list:
+    conn = get_user_conn()
+    rows = conn.execute(
+        "SELECT * FROM t_user_bond WHERE cost_price IS NOT NULL ORDER BY bond_code"
+    ).fetchall()
+    return [dict(r) for r in rows]
+
+
+# ── t_alert CRUD ──────────────────────────────────────────────────────────────
+
+def add_alert(bond_code: int, alert_type: str, operator: str, threshold: float) -> int:
+    import datetime as _dt
+    now = _dt.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    conn = get_user_conn()
+    cur = conn.execute("""
+        INSERT INTO t_alert (bond_code, alert_type, operator, threshold, enabled, updated_at)
+        VALUES (:bond_code, :alert_type, :operator, :threshold, 1, :updated_at)
+    """, {"bond_code": bond_code, "alert_type": alert_type, "operator": operator,
+          "threshold": threshold, "updated_at": now})
+    conn.commit()
+    return cur.lastrowid
+
+
+def delete_alert(alert_id: int) -> None:
+    conn = get_user_conn()
+    conn.execute("DELETE FROM t_alert WHERE id = ?", (alert_id,))
+    conn.commit()
+
+
+def query_alerts(bond_code: int = None) -> list:
+    conn = get_user_conn()
+    if bond_code is not None:
+        rows = conn.execute("SELECT * FROM t_alert WHERE bond_code = ? ORDER BY created_at", (bond_code,)).fetchall()
+    else:
+        rows = conn.execute("SELECT * FROM t_alert ORDER BY created_at").fetchall()
+    return [dict(r) for r in rows]
+
+
+# ── t_user_bond CRUD（笔记）────────────────────────────────────────────────────
+
+def upsert_note(bond_code: int, content: str) -> None:
+    import datetime as _dt
+    now = _dt.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    conn = get_user_conn()
+    conn.execute("""
+        INSERT INTO t_user_bond (bond_code, note_content, updated_at)
+        VALUES (:bond_code, :content, :updated_at)
+        ON CONFLICT(bond_code) DO UPDATE SET
+            note_content = excluded.note_content,
+            updated_at   = excluded.updated_at
+    """, {"bond_code": bond_code, "content": content, "updated_at": now})
+    conn.commit()
+
+
+def delete_note(bond_code: int) -> None:
+    conn = get_user_conn()
+    # 无持仓则删整条，有持仓则只清笔记字段
+    conn.execute("""
+        DELETE FROM t_user_bond
+        WHERE bond_code = ? AND (cost_price IS NULL AND quantity IS NULL)
+    """, (bond_code,))
+    conn.execute("""
+        UPDATE t_user_bond
+        SET note_content = NULL, updated_at = CURRENT_TIMESTAMP
+        WHERE bond_code = ?
+    """, (bond_code,))
+    conn.commit()
+
+
+def query_note(bond_code: int):
+    conn = get_user_conn()
+    row = conn.execute(
+        "SELECT bond_code, note_content AS content, created_at, updated_at "
+        "FROM t_user_bond WHERE bond_code = ?",
+        (bond_code,)
+    ).fetchone()
+    return dict(row) if row else None
+
+
+def update_bond_region(bond_code: int, region: str) -> None:
+    """更新指定债券的地区字段（不影响 updated_at）"""
+    conn = get_conn()
+    conn.execute(
+        "UPDATE t_bond_info SET region = ? WHERE bond_code = ?",
+        (region, bond_code),
+    )
+    conn.commit()
