@@ -24,7 +24,7 @@ async function loadBondList() {
   listContentEl.innerHTML = '<div class="list-loading">正在加载可转债列表...</div>';
   try {
     console.log('[bond-list.js] 开始请求 /api/bond_list 接口');
-    const res  = await fetch('/api/bond_list');
+    const res = await fetch('/api/bond_list');
     console.log('[bond-list.js] 接口响应状态:', res.status);
     const json = await res.json();
     console.log('[bond-list.js] 接口返回数据:', { success: json.success, dataLength: json.data?.length, pending_fill: json.pending_fill });
@@ -65,7 +65,7 @@ async function loadBondList() {
       });
     }
     console.log('[bond-list.js] loadBondList 执行完成');
-  } catch(e) {
+  } catch (e) {
     console.error('[bond-list.js] 加载债券列表失败:', e);
     listContentEl.innerHTML = `<div style="color:#c62828;padding:24px">⚠ 加载失败：${e.message}</div>`;
   }
@@ -244,7 +244,7 @@ function filterList() {
     if (!isNaN(remainYearsMin) || !isNaN(remainYearsMax)) {
       const ed2 = b['到期日期'] || '';
       if (ed2.length !== 8) return false;
-      const expireMs2 = new Date(`${ed2.slice(0,4)}-${ed2.slice(4,6)}-${ed2.slice(6,8)}`).getTime();
+      const expireMs2 = new Date(`${ed2.slice(0, 4)}-${ed2.slice(4, 6)}-${ed2.slice(6, 8)}`).getTime();
       const diffYears = (expireMs2 - Date.now()) / (1000 * 60 * 60 * 24 * 365.25);
       if (!isNaN(remainYearsMin) && diffYears < remainYearsMin) return false;
       if (!isNaN(remainYearsMax) && diffYears > remainYearsMax) return false;
@@ -299,15 +299,15 @@ function filterList() {
     const nameHasRetired = (b['债券简称'] || '').includes('退');
     // 到期日期已过 → 视为已退市
     const ed = b['到期日期'] || '';
-    const isExpired = ed.length === 8 && new Date(`${ed.slice(0,4)}-${ed.slice(4,6)}-${ed.slice(6,8)}`).getTime() < Date.now();
+    const isExpired = ed.length === 8 && new Date(`${ed.slice(0, 4)}-${ed.slice(4, 6)}-${ed.slice(6, 8)}`).getTime() < Date.now();
     const isDelisted = !!b['退市日期'] || nameHasRetired || isExpired; // 退市日期有值 或 名称含"退" 或 已到期 → 已退市
     // 待上市：没有上市日期 且 没有债现价（有债现价则必定已上市）且 非退市
-    const hasPrice_  = b['债现价'] != null;
-    const isPending  = !b['上市日期'] && !hasPrice_ && !isDelisted;
-    const isActive   = !isPending && !isDelisted;         // 已上市且未退市 → 在市
-    if (_delistFilter === 'active'   && !isActive)   return false;
-    if (_delistFilter === 'delisted' && !isDelisted)  return false;
-    if (_delistFilter === 'pending'  && !isPending)   return false;
+    const hasPrice_ = b['债现价'] != null;
+    const isPending = !b['上市日期'] && !hasPrice_ && !isDelisted;
+    const isActive = !isPending && !isDelisted;         // 已上市且未退市 → 在市
+    if (_delistFilter === 'active' && !isActive) return false;
+    if (_delistFilter === 'delisted' && !isDelisted) return false;
+    if (_delistFilter === 'pending' && !isPending) return false;
 
     // 市场筛选（通过正股代码前缀判断）
     const marketRadio = document.querySelector('input[name="marketFilter"]:checked');
@@ -328,7 +328,7 @@ function filterList() {
     if (listingDateMin || listingDateMax) {
       const ld = b['上市日期'] || '';
       if (ld.length !== 8) return false;
-      const ldFormatted = `${ld.slice(0,4)}-${ld.slice(4,6)}-${ld.slice(6,8)}`;
+      const ldFormatted = `${ld.slice(0, 4)}-${ld.slice(4, 6)}-${ld.slice(6, 8)}`;
       if (listingDateMin && ldFormatted < listingDateMin) return false;
       if (listingDateMax && ldFormatted > listingDateMax) return false;
     }
@@ -448,253 +448,254 @@ function renderBondList(bonds) {
     const listCountEl = document.getElementById('listCount');
     console.log('[bond-list.js] 获取 listCount 元素:', listCountEl);
     listCountEl.textContent = `共 ${bonds.length} 只`;
-    
+
     const listContentEl = document.getElementById('listContent');
     console.log('[bond-list.js] 获取 listContent 元素:', listContentEl);
-    
+
     if (!bonds.length) {
       console.log('[bond-list.js] 债券列表为空，显示暂无数据');
       listContentEl.innerHTML = '<div style="color:#aaa;padding:24px;text-align:center">暂无数据</div>';
       return;
     }
     console.log('[bond-list.js] 开始生成表格 HTML');
-  const sample = bonds[0];
-  const hasPremium    = '转股溢价率' in sample;
-  const hasPrice      = '债现价' in sample;
-  const hasRating     = '信用评级' in sample;
-  const hasRemain     = '剩余规模' in sample;
-  const hasIssueSize  = '发行规模' in sample;
-  const hasStockPrice = '正股价' in sample;
-  const hasConvertValue = '转股价值' in sample;
-  const hasYTM        = '到期收益率' in sample;
-  const hasStockPB    = '正股PB' in sample;
-  const hasStockMarketCap = '正股市值' in sample;
-  const hasStrongRedeem = '强赎状态' in sample;
-  const hasPutback    = '回售状态' in sample;
-  const hasListingDate = '上市日期' in sample;
-  const hasDelistDate  = '退市日期' in sample;
-  const hasExpireDate  = '到期日期' in sample;
-  const hasDoubleLow  = '双低值' in sample;
-  const hasRedeemProgress = '距离强赎线' in sample;
-  const hasXiuzheng   = '下修博弈' in sample;
-  // 仅在市状态下显示剩余年限
-  const showRemainYears = hasExpireDate && _delistFilter === 'active';
+    const sample = bonds[0];
+    const hasPremium = '转股溢价率' in sample;
+    const hasPrice = '债现价' in sample;
+    const hasRating = '信用评级' in sample;
+    const hasRemain = '剩余规模' in sample;
+    const hasIssueSize = '发行规模' in sample;
+    const hasStockPrice = '正股价' in sample;
+    const hasConvertValue = '转股价值' in sample;
+    const hasYTM = '到期收益率' in sample;
+    const hasStockPB = '正股PB' in sample;
+    const hasStockMarketCap = '正股市值' in sample;
+    const hasStrongRedeem = '强赎状态' in sample;
+    const hasPutback = '回售状态' in sample;
+    const hasListingDate = '上市日期' in sample;
+    const hasDelistDate = '退市日期' in sample;
+    const hasExpireDate = '到期日期' in sample;
+    const hasDoubleLow = '双低值' in sample;
+    const hasRedeemProgress = '距离强赎线' in sample;
+    const hasXiuzheng = '下修博弈' in sample;
+    // 仅在市状态下显示剩余年限
+    const showRemainYears = hasExpireDate && _delistFilter === 'active';
 
-  // 生成排序箭头
-  function _sortIcon(key) {
-    if (_sortKey !== key) return '<span class="sort-icon">⇅</span>';
-    return _sortDir === 'asc'
-      ? '<span class="sort-icon active">↑</span>'
-      : '<span class="sort-icon active">↓</span>';
-  }
+    // 生成排序箭头
+    function _sortIcon(key) {
+      if (_sortKey !== key) return '<span class="sort-icon">⇅</span>';
+      return _sortDir === 'asc'
+        ? '<span class="sort-icon active">↑</span>'
+        : '<span class="sort-icon active">↓</span>';
+    }
 
-  // 根据冻结列数生成 td 的 sticky 属性
-  // 列宽：债券代码=88px，债券名称=90px，正股代码=130px
-  const COL_WIDTHS = [88, 90, 130]; // 前三列宽度
-  function _frozenTdStyle(colIdx) {
-    if (colIdx >= _freezeCols) return ' class="num"';
-    const left = COL_WIDTHS.slice(0, colIdx).reduce((a, b) => a + b, 0);
-    const isLast = colIdx === _freezeCols - 1;
-    return ` class="num col-frozen${isLast ? ' col-frozen-last' : ''}" style="left:${left}px"`;
-  }
-  function _frozenTdTextStyle(colIdx) {
-    if (colIdx >= _freezeCols) return '';
-    const left = COL_WIDTHS.slice(0, colIdx).reduce((a, b) => a + b, 0);
-    const isLast = colIdx === _freezeCols - 1;
-    return ` class="col-frozen${isLast ? ' col-frozen-last' : ''}" style="left:${left}px"`;
-  }
+    // 根据冻结列数生成 td 的 sticky 属性
+    // 列宽：债券代码=88px，债券名称=90px，正股代码=130px
+    const COL_WIDTHS = [88, 90, 130]; // 前三列宽度
+    function _frozenTdStyle(colIdx) {
+      if (colIdx >= _freezeCols) return ' class="num"';
+      const left = COL_WIDTHS.slice(0, colIdx).reduce((a, b) => a + b, 0);
+      const isLast = colIdx === _freezeCols - 1;
+      return ` class="num col-frozen${isLast ? ' col-frozen-last' : ''}" style="left:${left}px"`;
+    }
+    function _frozenTdTextStyle(colIdx) {
+      if (colIdx >= _freezeCols) return '';
+      const left = COL_WIDTHS.slice(0, colIdx).reduce((a, b) => a + b, 0);
+      const isLast = colIdx === _freezeCols - 1;
+      return ` class="col-frozen${isLast ? ' col-frozen-last' : ''}" style="left:${left}px"`;
+    }
 
-  // 图钉图标：已冻结高亮竖直，未冻结灰色斜放
-  function _pinIcon(colIdx) {
-    const frozen = colIdx < _freezeCols;
-    return `<span class="col-pin-btn${frozen ? ' pinned' : ''}" onclick="event.stopPropagation();toggleFreezeCol(${colIdx})" title="${frozen ? '点击取消固定' : '点击固定此列'}">📌</span>`;
-  }
+    // 图钉图标：已冻结高亮竖直，未冻结灰色斜放
+    function _pinIcon(colIdx) {
+      const frozen = colIdx < _freezeCols;
+      return `<span class="col-pin-btn${frozen ? ' pinned' : ''}" onclick="event.stopPropagation();toggleFreezeCol(${colIdx})" title="${frozen ? '点击取消固定' : '点击固定此列'}">📌</span>`;
+    }
 
-  // 生成前4列可冻结列的 <th>
-  function _thWrap(colIdx, label, extraClass = '') {
-    const frozen = colIdx < _freezeCols;
-    const isLast = frozen && colIdx === _freezeCols - 1;
-    const left = COL_WIDTHS.slice(0, colIdx).reduce((a, b) => a + b, 0);
-    const classes = [extraClass, frozen ? 'col-frozen' : '', isLast ? 'col-frozen-last' : ''].filter(Boolean).join(' ');
-    const style = frozen ? ` style="left:${left}px"` : '';
-    return `<th class="${classes || 'th-freezable'}"${style}>${label}${_pinIcon(colIdx)}</th>`;
-  }
+    // 生成可冻结列的 <th>
+    function _thWrap(colIdx, label, extraClass = '', sortKey = '') {
+      const frozen = colIdx < _freezeCols;
+      const isLast = frozen && colIdx === _freezeCols - 1;
+      const left = COL_WIDTHS.slice(0, colIdx).reduce((a, b) => a + b, 0);
+      const classes = [extraClass, frozen ? 'col-frozen' : '', isLast ? 'col-frozen-last' : '', sortKey ? 'sortable' : ''].filter(Boolean).join(' ');
+      const style = frozen ? ` style="left:${left}px"` : '';
+      const onclick = sortKey ? ` onclick="sortList('${sortKey}')"` : '';
+      return `<th class="${classes || 'th-freezable'}"${style}${onclick}>${label}${sortKey ? _sortIcon(sortKey) : ''}${_pinIcon(colIdx)}</th>`;
+    }
 
-  let thead = `<tr>
-    ${_thWrap(0, '债券代码')}
-    ${_thWrap(1, '债券名称')}
-    ${_thWrap(2, '正股代码', 'num')}
-    ${_thWrap(3, '正股名称')}`;
-  if (hasPrice)       thead += `<th class="num sortable" onclick="sortList('债现价')">债现价${_sortIcon('债现价')}</th>`;
-  if (showRemainYears) thead += `<th class="num sortable" onclick="sortList('到期日期')">剩余年限${_sortIcon('到期日期')}</th>`;
-  if (hasStockPrice)  thead += '<th class="num">正股价</th>';
-  if (hasConvertValue) thead += `<th class="num sortable" onclick="sortList('转股价值')">转股价值${_sortIcon('转股价值')}</th>`;
-  if (hasPremium)     thead += `<th class="num sortable" onclick="sortList('转股溢价率')">转股溢价率${_sortIcon('转股溢价率')}</th>`;
-  if (hasDoubleLow)   thead += `<th class="num sortable" onclick="sortList('双低值')">双低值${_sortIcon('双低值')}</th>`;
-  if (hasRedeemProgress) thead += `<th class="num">强赎进度</th>`;
-  if (hasXiuzheng)    thead += `<th class="center">下修博弈</th>`;
-  if (hasYTM)        thead += `<th class="num sortable" onclick="sortList('到期收益率')">到期收益率${_sortIcon('到期收益率')}</th>`;
-  if (hasRating)      thead += `<th class="center sortable" onclick="sortList('信用评级')">信用评级${_sortIcon('信用评级')}</th>`;
-  if (hasRemain)      thead += `<th class="num sortable" onclick="sortList('剩余规模')">剩余规模(亿)${_sortIcon('剩余规模')}</th>`;
-  if (hasIssueSize)   thead += `<th class="num sortable" onclick="sortList('发行规模')">发行规模(亿)${_sortIcon('发行规模')}</th>`;
-  if (hasStockPB)     thead += `<th class="num sortable" onclick="sortList('正股PB')">正股PB${_sortIcon('正股PB')}</th>`;
-  if (hasStockMarketCap) thead += `<th class="num sortable" onclick="sortList('正股市值')">正股市值(亿)${_sortIcon('正股市值')}</th>`;
-  if (hasStrongRedeem) thead += `<th class="center">强赎状态</th>`;
-  if (hasPutback)    thead += `<th class="center">回售状态</th>`;
-  if (hasListingDate) thead += `<th class="center sortable" onclick="sortList('上市日期')">上市日期${_sortIcon('上市日期')}</th>`;
-  if (hasDelistDate)  thead += `<th class="center sortable" onclick="sortList('退市日期')">退市日期${_sortIcon('退市日期')}</th>`;
-  thead += '</tr>';
+    let thead = `<tr>
+    ${_thWrap(0, '债券代码', '', '债券代码')}
+    ${_thWrap(1, '债券名称', '', '债券简称')}
+    ${_thWrap(2, '正股代码', 'num', '正股代码')}
+    ${_thWrap(3, '正股名称', '', '正股简称')}`;
+    if (hasPrice) thead += `<th class="num sortable" onclick="sortList('债现价')">债现价${_sortIcon('债现价')}</th>`;
+    if (showRemainYears) thead += `<th class="num sortable" onclick="sortList('到期日期')">剩余年限${_sortIcon('到期日期')}</th>`;
+    if (hasStockPrice) thead += `<th class="num sortable" onclick="sortList('正股价')">正股价${_sortIcon('正股价')}</th>`;
+    if (hasConvertValue) thead += `<th class="num sortable" onclick="sortList('转股价值')">转股价值${_sortIcon('转股价值')}</th>`;
+    if (hasPremium) thead += `<th class="num sortable" onclick="sortList('转股溢价率')">转股溢价率${_sortIcon('转股溢价率')}</th>`;
+    if (hasDoubleLow) thead += `<th class="num sortable" onclick="sortList('双低值')">双低值${_sortIcon('双低值')}</th>`;
+    if (hasRedeemProgress) thead += `<th class="num sortable" onclick="sortList('距离强赎线')">强赎进度${_sortIcon('距离强赎线')}</th>`;
+    if (hasXiuzheng) thead += `<th class="center sortable" onclick="sortList('下修博弈')">下修博弈${_sortIcon('下修博弈')}</th>`;
+    if (hasYTM) thead += `<th class="num sortable" onclick="sortList('到期收益率')">到期收益率${_sortIcon('到期收益率')}</th>`;
+    if (hasRating) thead += `<th class="center sortable" onclick="sortList('信用评级')">信用评级${_sortIcon('信用评级')}</th>`;
+    if (hasRemain) thead += `<th class="num sortable" onclick="sortList('剩余规模')">剩余规模(亿)${_sortIcon('剩余规模')}</th>`;
+    if (hasIssueSize) thead += `<th class="num sortable" onclick="sortList('发行规模')">发行规模(亿)${_sortIcon('发行规模')}</th>`;
+    if (hasStockPB) thead += `<th class="num sortable" onclick="sortList('正股PB')">正股PB${_sortIcon('正股PB')}</th>`;
+    if (hasStockMarketCap) thead += `<th class="num sortable" onclick="sortList('正股市值')">正股市值(亿)${_sortIcon('正股市值')}</th>`;
+    if (hasStrongRedeem) thead += `<th class="center sortable" onclick="sortList('强赎状态')">强赎状态${_sortIcon('强赎状态')}</th>`;
+    if (hasPutback) thead += `<th class="center sortable" onclick="sortList('回售状态')">回售状态${_sortIcon('回售状态')}</th>`;
+    if (hasListingDate) thead += `<th class="center sortable" onclick="sortList('上市日期')">上市日期${_sortIcon('上市日期')}</th>`;
+    if (hasDelistDate) thead += `<th class="center sortable" onclick="sortList('退市日期')">退市日期${_sortIcon('退市日期')}</th>`;
+    thead += '</tr>';
 
-  console.log('[bond-list.js] 开始生成 tbody HTML，排序后数据条数:', sorted.length);
-  const tbody = sorted.map((b, index) => {
-    console.log(`[bond-list.js] 渲染第 ${index + 1} 条债券:`, b['债券代码'], b['债券简称']);
-    const code = b['债券代码'] || '-';
-    const name = b['债券简称'] || '-';
-    const sc   = b['正股代码'] || '-';
-    const sn   = b['正股简称'] || '-';
-    let row = `<tr>
+    console.log('[bond-list.js] 开始生成 tbody HTML，排序后数据条数:', sorted.length);
+    const tbody = sorted.map((b, index) => {
+      console.log(`[bond-list.js] 渲染第 ${index + 1} 条债券:`, b['债券代码'], b['债券简称']);
+      const code = b['债券代码'] || '-';
+      const name = b['债券简称'] || '-';
+      const sc = b['正股代码'] || '-';
+      const sn = b['正股简称'] || '-';
+      let row = `<tr>
       <td${_frozenTdTextStyle(0)}><a class="bond-code-link" onclick="openDetail('${code}')">${code}</a></td>
       <td${_frozenTdTextStyle(1)}>${name}${_positions.some(p => String(p.bond_code) === String(code)) ? '<span style="display:inline-block;width:6px;height:6px;border-radius:50%;background:#4caf50;margin-left:4px;vertical-align:middle"></span>' : ''}</td>
       <td${_frozenTdStyle(2)}>${sc}</td>
       <td${_frozenTdTextStyle(3)}>${sn}</td>`;
-    if (hasPrice) {
-      const p = b['债现价'] != null ? parseFloat(b['债现价']).toFixed(3) : '-';
-      row += `<td class="num">${p}</td>`;
-    }
-    if (showRemainYears) {
-      const ed = b['到期日期'] || '';
-      if (ed.length === 8) {
-        const expireMs = new Date(`${ed.slice(0,4)}-${ed.slice(4,6)}-${ed.slice(6,8)}`).getTime();
-        const nowMs = Date.now();
-        const diffDays = Math.ceil((expireMs - nowMs) / (1000 * 60 * 60 * 24));
-        if (diffDays > 0) {
-          let label, cls;
-          if (diffDays < 180) {
-            label = `${diffDays}天`;
-            cls = 'neg';
+      if (hasPrice) {
+        const p = b['债现价'] != null ? parseFloat(b['债现价']).toFixed(3) : '-';
+        row += `<td class="num">${p}</td>`;
+      }
+      if (showRemainYears) {
+        const ed = b['到期日期'] || '';
+        if (ed.length === 8) {
+          const expireMs = new Date(`${ed.slice(0, 4)}-${ed.slice(4, 6)}-${ed.slice(6, 8)}`).getTime();
+          const nowMs = Date.now();
+          const diffDays = Math.ceil((expireMs - nowMs) / (1000 * 60 * 60 * 24));
+          if (diffDays > 0) {
+            let label, cls;
+            if (diffDays < 180) {
+              label = `${diffDays}天`;
+              cls = 'neg';
+            } else {
+              const years = (diffDays / 365.25).toFixed(2);
+              cls = diffDays < 365 * 2 ? 'pos' : '';
+              label = `${years}年`;
+            }
+            row += `<td class="num"><span class="${cls}">${label}</span></td>`;
           } else {
-            const years = (diffDays / 365.25).toFixed(2);
-            cls = diffDays < 365 * 2 ? 'pos' : '';
-            label = `${years}年`;
+            row += `<td class="num"><span class="neg">已到期</span></td>`;
           }
-          row += `<td class="num"><span class="${cls}">${label}</span></td>`;
         } else {
-          row += `<td class="num"><span class="neg">已到期</span></td>`;
+          row += `<td class="num">-</td>`;
         }
-      } else {
-        row += `<td class="num">-</td>`;
       }
-    }
-    if (hasStockPrice) {
-      const sp = b['正股价'] != null ? parseFloat(b['正股价']).toFixed(3) : '-';
-      row += `<td class="num">${sp}</td>`;
-    }
-    if (hasConvertValue) {
-      const cv = b['转股价值'] != null ? parseFloat(b['转股价值']).toFixed(2) : '-';
-      row += `<td class="num">${cv}</td>`;
-    }
-    if (hasPremium) {
-      const pv = b['转股溢价率'];
-      if (pv != null) {
-        const pn  = parseFloat(pv);
-        const cls = pn >= 0 ? 'pos' : 'neg';
-        const txt = (pn >= 0 ? '+' : '') + pn.toFixed(2) + '%';
-        row += `<td class="num"><span class="premium-tag ${cls}">${txt}</span></td>`;
-      } else {
-        row += '<td class="num">-</td>';
+      if (hasStockPrice) {
+        const sp = b['正股价'] != null ? parseFloat(b['正股价']).toFixed(3) : '-';
+        row += `<td class="num">${sp}</td>`;
       }
-    }
-    if (hasDoubleLow) {
-      const dl = b['双低值'] != null ? parseFloat(b['双低值']).toFixed(2) : '-';
-      row += `<td class="num">${dl}</td>`;
-    }
-    if (hasRedeemProgress) {
-      const rp = b['距离强赎线'];
-      if (rp != null) {
-        const rpn = parseFloat(rp);
-        let rpc = '';
-        if (rpn >= 100) rpc = 'neg';
-        else if (rpn >= 90) rpc = 'pos';
-        row += `<td class="num"><span class="${rpc}">${rpn.toFixed(1)}%</span></td>`;
-      } else {
-        row += '<td class="num">-</td>';
+      if (hasConvertValue) {
+        const cv = b['转股价值'] != null ? parseFloat(b['转股价值']).toFixed(2) : '-';
+        row += `<td class="num">${cv}</td>`;
       }
-    }
-    if (hasXiuzheng) {
-      const xz = b['下修博弈'];
-      row += `<td class="center">${xz ? '<span class="pos">是</span>' : '-'}</td>`;
-    }
-    if (hasYTM) {
-      const ytm = b['到期收益率'] != null ? parseFloat(b['到期收益率']).toFixed(2) : '-';
-      row += `<td class="num">${ytm}</td>`;
-    }
-    if (hasRating) {
-      const r = _pureRating(b['信用评级']) || '-';
-      row += `<td class="center"><span class="rating-tag">${r}</span></td>`;
-    }
-    if (hasRemain) {
-const rv = b['剩余规模'] != null ? parseFloat(b['剩余规模']).toFixed(2) : '-';
-      row += `<td class="num">${rv}</td>`;
-    }
-    if (hasIssueSize) {
-      const iv = b['发行规模'] != null ? parseFloat(b['发行规模']).toFixed(2) : '-';
-      row += `<td class="num">${iv}</td>`;
-    }
-    if (hasStockPB) {
-      const pb = b['正股PB'] != null ? parseFloat(b['正股PB']).toFixed(2) : '-';
-      row += `<td class="num">${pb}</td>`;
-    }
-    if (hasStockMarketCap) {
-      const mc = b['正股市值'] != null ? parseFloat(b['正股市值']).toFixed(2) : '-';
-      row += `<td class="num">${mc}</td>`;
-    }
-    if (hasStrongRedeem) {
-      const sr = b['强赎状态'] || '-';
-      row += `<td class="center">${sr}</td>`;
-    }
-    if (hasPutback) {
-      const pp = b['回售状态'] || '-';
-      row += `<td class="center">${pp}</td>`;
-    }
-    if (hasListingDate) {
-      const ld = b['上市日期'] || '-';
-      // YYYYMMDD → YYYY-MM-DD
-      const ldFmt = ld.length === 8 ? `${ld.slice(0,4)}-${ld.slice(4,6)}-${ld.slice(6,8)}` : ld;
-      row += `<td class="center">${ldFmt}</td>`;
-    }
-    if (hasDelistDate) {
-      const dd = b['退市日期'] || '';
-      const ddFmt = dd.length === 8 ? `${dd.slice(0,4)}-${dd.slice(4,6)}-${dd.slice(6,8)}` : (dd || '-');
-      row += `<td class="center">${ddFmt}</td>`;
-    }
-    row += '</tr>';
-    return row;
-  }).join('');
+      if (hasPremium) {
+        const pv = b['转股溢价率'];
+        if (pv != null) {
+          const pn = parseFloat(pv);
+          const cls = pn >= 0 ? 'pos' : 'neg';
+          const txt = (pn >= 0 ? '+' : '') + pn.toFixed(2) + '%';
+          row += `<td class="num"><span class="premium-tag ${cls}">${txt}</span></td>`;
+        } else {
+          row += '<td class="num">-</td>';
+        }
+      }
+      if (hasDoubleLow) {
+        const dl = b['双低值'] != null ? parseFloat(b['双低值']).toFixed(2) : '-';
+        row += `<td class="num">${dl}</td>`;
+      }
+      if (hasRedeemProgress) {
+        const rp = b['距离强赎线'];
+        if (rp != null) {
+          const rpn = parseFloat(rp);
+          let rpc = '';
+          if (rpn >= 100) rpc = 'neg';
+          else if (rpn >= 90) rpc = 'pos';
+          row += `<td class="num"><span class="${rpc}">${rpn.toFixed(1)}%</span></td>`;
+        } else {
+          row += '<td class="num">-</td>';
+        }
+      }
+      if (hasXiuzheng) {
+        const xz = b['下修博弈'];
+        row += `<td class="center">${xz ? '<span class="pos">是</span>' : '-'}</td>`;
+      }
+      if (hasYTM) {
+        const ytm = b['到期收益率'] != null ? parseFloat(b['到期收益率']).toFixed(2) : '-';
+        row += `<td class="num">${ytm}</td>`;
+      }
+      if (hasRating) {
+        const r = _pureRating(b['信用评级']) || '-';
+        row += `<td class="center"><span class="rating-tag">${r}</span></td>`;
+      }
+      if (hasRemain) {
+        const rv = b['剩余规模'] != null ? parseFloat(b['剩余规模']).toFixed(2) : '-';
+        row += `<td class="num">${rv}</td>`;
+      }
+      if (hasIssueSize) {
+        const iv = b['发行规模'] != null ? parseFloat(b['发行规模']).toFixed(2) : '-';
+        row += `<td class="num">${iv}</td>`;
+      }
+      if (hasStockPB) {
+        const pb = b['正股PB'] != null ? parseFloat(b['正股PB']).toFixed(2) : '-';
+        row += `<td class="num">${pb}</td>`;
+      }
+      if (hasStockMarketCap) {
+        const mc = b['正股市值'] != null ? parseFloat(b['正股市值']).toFixed(2) : '-';
+        row += `<td class="num">${mc}</td>`;
+      }
+      if (hasStrongRedeem) {
+        const sr = b['强赎状态'] || '-';
+        row += `<td class="center">${sr}</td>`;
+      }
+      if (hasPutback) {
+        const pp = b['回售状态'] || '-';
+        row += `<td class="center">${pp}</td>`;
+      }
+      if (hasListingDate) {
+        const ld = b['上市日期'] || '-';
+        // YYYYMMDD → YYYY-MM-DD
+        const ldFmt = ld.length === 8 ? `${ld.slice(0, 4)}-${ld.slice(4, 6)}-${ld.slice(6, 8)}` : ld;
+        row += `<td class="center">${ldFmt}</td>`;
+      }
+      if (hasDelistDate) {
+        const dd = b['退市日期'] || '';
+        const ddFmt = dd.length === 8 ? `${dd.slice(0, 4)}-${dd.slice(4, 6)}-${dd.slice(6, 8)}` : (dd || '-');
+        row += `<td class="center">${ddFmt}</td>`;
+      }
+      row += '</tr>';
+      return row;
+    }).join('');
 
-  console.log('[bond-list.js] tbody HTML 生成完成，长度:', tbody.length);
-  console.log('[bond-list.js] thead HTML:', thead.substring(0, 200) + '...');
-  
-  const fullHtml = `
+    console.log('[bond-list.js] tbody HTML 生成完成，长度:', tbody.length);
+    console.log('[bond-list.js] thead HTML:', thead.substring(0, 200) + '...');
+
+    const fullHtml = `
     <div class="bond-list-table-wrap">
       <table class="bond-list-table">
         <thead>${thead}</thead>
         <tbody>${tbody}</tbody>
       </table>
     </div>`;
-  
-  console.log('[bond-list.js] 准备设置 listContent 的 innerHTML，HTML 总长度:', fullHtml.length);
-  listContentEl.innerHTML = fullHtml;
-  console.log('[bond-list.js] listContent 的 innerHTML 设置完成');
-  console.log('[bond-list.js] 设置后 listContent 的子元素个数:', listContentEl.children.length);
-  
-  // 检查表格是否成功渲染
-  const tableEl = listContentEl.querySelector('.bond-list-table');
-  console.log('[bond-list.js] 查找表格元素:', tableEl);
-  if (tableEl) {
-    console.log('[bond-list.js] 表格行数:', tableEl.querySelectorAll('tr').length);
-  }
-  
-  console.log('[bond-list.js] renderBondList 执行完成');
+
+    console.log('[bond-list.js] 准备设置 listContent 的 innerHTML，HTML 总长度:', fullHtml.length);
+    listContentEl.innerHTML = fullHtml;
+    console.log('[bond-list.js] listContent 的 innerHTML 设置完成');
+    console.log('[bond-list.js] 设置后 listContent 的子元素个数:', listContentEl.children.length);
+
+    // 检查表格是否成功渲染
+    const tableEl = listContentEl.querySelector('.bond-list-table');
+    console.log('[bond-list.js] 查找表格元素:', tableEl);
+    if (tableEl) {
+      console.log('[bond-list.js] 表格行数:', tableEl.querySelectorAll('tr').length);
+    }
+
+    console.log('[bond-list.js] renderBondList 执行完成');
   } catch (e) {
     console.error('[bond-list.js] renderBondList 执行出错:', e);
     const listContentEl = document.getElementById('listContent');
@@ -707,14 +708,14 @@ const rv = b['剩余规模'] != null ? parseFloat(b['剩余规模']).toFixed(2) 
 // ── 快捷策略筛选 ────────────────────────────────────────────────────
 function setQuickFilter(preset) {
   // 先重置所有可变数字输入框
-  ['priceMin','priceMax','premiumMin','premiumMax','convertValueMin','convertValueMax',
-   'ytmMin','ytmMax','remainYearsMin','remainYearsMax',
-   'remainScaleMin','remainScaleMax','issueScaleMin','issueScaleMax',
-   'stockPriceMin','stockPriceMax','stockPbMin','stockPbMax',
-   'stockMarketCapMin','stockMarketCapMax'].forEach(id => {
-    const el = document.getElementById(id);
-    if (el) el.value = '';
-  });
+  ['priceMin', 'priceMax', 'premiumMin', 'premiumMax', 'convertValueMin', 'convertValueMax',
+    'ytmMin', 'ytmMax', 'remainYearsMin', 'remainYearsMax',
+    'remainScaleMin', 'remainScaleMax', 'issueScaleMin', 'issueScaleMax',
+    'stockPriceMin', 'stockPriceMax', 'stockPbMin', 'stockPbMax',
+    'stockMarketCapMin', 'stockMarketCapMax'].forEach(id => {
+      const el = document.getElementById(id);
+      if (el) el.value = '';
+    });
   // 重置上市时间
   const ldm = document.getElementById('listingDateMin');
   const ldx = document.getElementById('listingDateMax');
@@ -768,14 +769,14 @@ function setQuickFilter(preset) {
 // ── 重置所有筛选条件 ─────────────────────────────────────────────────
 function resetFilters() {
   document.getElementById('listSearch').value = '';
-  ['priceMin','priceMax','premiumMin','premiumMax','convertValueMin','convertValueMax',
-   'ytmMin','ytmMax','remainYearsMin','remainYearsMax',
-   'remainScaleMin','remainScaleMax','issueScaleMin','issueScaleMax',
-   'stockPriceMin','stockPriceMax','stockPbMin','stockPbMax',
-   'stockMarketCapMin','stockMarketCapMax'].forEach(id => {
-    const el = document.getElementById(id);
-    if (el) el.value = '';
-  });
+  ['priceMin', 'priceMax', 'premiumMin', 'premiumMax', 'convertValueMin', 'convertValueMax',
+    'ytmMin', 'ytmMax', 'remainYearsMin', 'remainYearsMax',
+    'remainScaleMin', 'remainScaleMax', 'issueScaleMin', 'issueScaleMax',
+    'stockPriceMin', 'stockPriceMax', 'stockPbMin', 'stockPbMax',
+    'stockMarketCapMin', 'stockMarketCapMax'].forEach(id => {
+      const el = document.getElementById(id);
+      if (el) el.value = '';
+    });
   // 重置上市时间
   const ldm = document.getElementById('listingDateMin');
   const ldx = document.getElementById('listingDateMax');
