@@ -21,6 +21,7 @@ async function loadBondInfo(bondCode) {
     _adjLoaded    = false;
     _stockLoaded  = false;
     _newsLoaded   = false;
+    _noteLoaded   = false;
     // 若当前有激活的 tab，重新加载对应数据
     if (_activeTab === 'coupon') loadCouponInfo(bondCode);
     else if (_activeTab === 'adj') loadAdjLogs(bondCode);
@@ -32,6 +33,7 @@ async function loadBondInfo(bondCode) {
       const sc = json.data["正股代码"] || "";
       if (sc) loadStockNews(sc);
     }
+    else if (_activeTab === 'note') loadNote(bondCode);
     const now = new Date();
     document.getElementById("infoUpdateTime").textContent =
       `更新于 ${now.getHours().toString().padStart(2,'0')}:${now.getMinutes().toString().padStart(2,'0')}`;
@@ -132,6 +134,8 @@ let _stockLoaded  = false;  // 正股财务是否已加载
 let _stockCode    = "";     // 已加载财务的正股代码
 let _newsLoaded   = false;  // 公告/热点是否已加载
 let _newsStockCode = "";    // 已加载新闻的正股代码
+let _noteLoaded   = false;  // 笔记是否已加载
+let _noteBondCode = "";     // 已加载笔记的债券代码
 let _activeTab    = "";     // 当前激活的 tab
 
 function switchDetailTab(tab) {
@@ -139,10 +143,12 @@ function switchDetailTab(tab) {
   document.getElementById('tabBtnAdj').classList.toggle('active', tab === 'adj');
   document.getElementById('tabBtnStock').classList.toggle('active', tab === 'stock');
   document.getElementById('tabBtnNews').classList.toggle('active', tab === 'news');
+  document.getElementById('tabBtnNote').classList.toggle('active', tab === 'note');
   document.getElementById('panelCoupon').classList.toggle('active', tab === 'coupon');
   document.getElementById('panelAdj').classList.toggle('active', tab === 'adj');
   document.getElementById('panelStock').classList.toggle('active', tab === 'stock');
   document.getElementById('panelNews').classList.toggle('active', tab === 'news');
+  document.getElementById('panelNote').classList.toggle('active', tab === 'note');
   _activeTab = tab;
   const bondCode = document.getElementById('bond_code').value.trim();
   if (tab === 'coupon' && (!_couponLoaded || _couponBondCode !== bondCode)) {
@@ -163,6 +169,9 @@ function switchDetailTab(tab) {
     if (sc && (!_newsLoaded || _newsStockCode !== sc)) {
       loadStockNews(sc);
     }
+  }
+  if (tab === 'note' && (!_noteLoaded || _noteBondCode !== bondCode)) {
+    loadNote(bondCode);
   }
 }
 
@@ -727,4 +736,61 @@ function renderTargetPriceCalc(d) {
     </div>
     <div class="target-calc-note">基于剩余现金流折现反推，仅供参考</div>
   </div>`;
+}
+
+// ── 笔记 ───────────────────────────────────────────────────────────
+
+async function loadNote(bondCode) {
+  _noteBondCode = bondCode;
+  _noteLoaded   = false;
+  const textarea = document.getElementById('noteContent');
+  textarea.value = '正在加载...';
+  try {
+    const res  = await fetch(`/api/note?bond_code=${encodeURIComponent(bondCode)}`);
+    const json = await res.json();
+    if (json.success && json.data) {
+      textarea.value = json.data.content || '';
+    } else {
+      textarea.value = '';
+    }
+    _noteLoaded = true;
+  } catch (e) {
+    textarea.value = '';
+  }
+}
+
+async function saveNote() {
+  const bondCode = document.getElementById('bond_code').value.trim();
+  const content  = document.getElementById('noteContent').value;
+  if (!bondCode) return;
+  try {
+    const res = await fetch('/api/note', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({bond_code: bondCode, content: content}),
+    });
+    const json = await res.json();
+    if (json.success) {
+      alert('笔记已保存');
+    } else {
+      alert('保存失败：' + (json.message || ''));
+    }
+  } catch (e) {
+    alert('保存失败：' + e.message);
+  }
+}
+
+async function deleteNote() {
+  const bondCode = document.getElementById('bond_code').value.trim();
+  if (!bondCode) return;
+  if (!confirm('确定删除这条笔记？')) return;
+  try {
+    const res = await fetch(`/api/note?bond_code=${encodeURIComponent(bondCode)}`, {method: 'DELETE'});
+    const json = await res.json();
+    if (json.success) {
+      document.getElementById('noteContent').value = '';
+    }
+  } catch (e) {
+    alert('删除失败：' + e.message);
+  }
 }

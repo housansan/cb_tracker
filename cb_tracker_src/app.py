@@ -2,9 +2,11 @@ from __future__ import annotations
 
 from flask import Flask, render_template, request, jsonify
 from bond import get_convertible_bond_history, get_all_convertible_bonds, get_bond_info, fetch_bond_detail_only, get_bond_adj_logs
+from bond.db import update_bond_region, query_positions, upsert_position, delete_position, query_alerts, add_alert, delete_alert, query_note, upsert_note, delete_note
+from bond.cache import read_local_cache
 from bond.fetch import fetch_all_cb_remaining
 from bond.history import build_cashflows_from_coupon_info
-from config import LOG_CONFIG, EXPORT_CONFIG, DB_CONFIG, BOND_CONFIG, NETWORK_CONFIG
+from config import LOG_CONFIG, EXPORT_CONFIG, DB_CONFIG, USER_DB_CONFIG, BOND_CONFIG, NETWORK_CONFIG
 from datetime import datetime, timedelta
 from logging.handlers import TimedRotatingFileHandler
 import akshare as ak
@@ -78,7 +80,7 @@ os.makedirs(EXPORT_CONFIG["dir"], exist_ok=True)
 
 # ── 数据库初始化 ─────────────────────────────────────────────────────────────
 from bond.db import (
-    init_db, upsert_bond, upsert_bonds,
+    init_db, init_user_db, upsert_bond, upsert_bonds,
     query_bond, query_bonds, count_bonds,
     bond_info_to_db_row, bond_list_row_to_db_row,
     db_row_to_bond_info, query_bond_updated_at, query_latest_updated_at,
@@ -87,6 +89,7 @@ from bond.db import (
     upsert_stock_financials, query_stock_financials,
 )
 init_db(DB_CONFIG["dir"])
+init_user_db(USER_DB_CONFIG["dir"])
 
 # bond_info 缓存有效期（秒）：24 小时
 _BOND_INFO_DB_TTL = 86400
@@ -128,6 +131,12 @@ def _fill_bond_details_async(bond_codes: list) -> None:
                     filled += 1
                 else:
                     logger.warning("[fill_details] bond_info_to_db_row 返回空 bond_code=%s", code)
+                # 顺带获取转股价调整记录并写入缓存（不阻塞）
+                try:
+                    adj_logs = get_bond_adj_logs(str(code))
+                    logger.info("[fill_details] 转股价调整记录 bond_code=%s count=%d", code, len(adj_logs))
+                except Exception as _adj_e:
+                    logger.warning("[fill_details] 获取转股价调整记录失败 bond_code=%s err=%s", code, _adj_e)
             except Exception as _e:
                 logger.warning("[fill_details] 补全失败 bond_code=%s err=%s", code, _e)
             finally:
@@ -388,18 +397,56 @@ def api_bond_info():
                         info["剩余规模"] = all_remaining.get(bond_code.strip())
                     except Exception as _re:
                         logger.warning("[/api/bond_info] 补充剩余规模失败 bond_code=%s err=%s", bond_code, _re)
-                    logger.info("[/api/bond_info] DB 缓存命中 bond_code=%s age=%.0fs", bond_code, age)
+                    # 检查是否有转股价下调记录（使用统一接口，自带内存缓存）
+                    try:
+                        adj_logs = get_bond_adj_logs(bond_code)
+                        info["has_adj_logs"] = len(adj_logs) > 0
+                    except Exception:
+                        info["has_adj_logs"] = False
+                    logger.info("[/api/bond_info] DB 缓存命中 bond_code=%s age=%.0fs has_adj=%s", bond_code, age, info["has_adj_logs"])
                     _attach_cashflows(info)
                     return jsonify({"success": True, "data": info, "from_cache": True})
     except Exception as _e:
         logger.warning("[/api/bond_info] DB 读取失败，降级请求接口 bond_code=%s err=%s", bond_code, _e)
 
-    # ── 请求接口 ──────────────────────────────────────────────────────────────
+    # ── 请求接口（单只查询，避免拉取全量列表）───────────────────────────────────
     logger.info("[/api/bond_info] 请求基础信息 bond_code=%s", bond_code)
-    info = get_bond_info(bond_code)
+    info = fetch_bond_detail_only(bond_code)
     if not info:
         logger.warning("[/api/bond_info] 未找到可转债 bond_code=%s", bond_code)
         return jsonify({"success": False, "message": f"未找到代码为 {bond_code} 的可转债"}), 404
+
+    # 补充实时价格字段（债现价、正股价、转股溢价率）
+    try:
+        price_map = _get_price_map()
+        prices = price_map.get(bond_code.strip(), {})
+        info["债现价"]     = prices.get("债现价")
+        info["正股价"]     = prices.get("正股价")
+        info["转股溢价率"] = prices.get("转股溢价率")
+        # 计算转股价值：正股价 / 转股价 * 100
+        try:
+            conv_price = info.get("转股价")
+            stock_price = info.get("正股价")
+            if conv_price and stock_price and conv_price > 0:
+                info["转股价值"] = round(float(stock_price) / float(conv_price) * 100, 4)
+        except Exception:
+            pass
+    except Exception as _pe:
+        logger.warning("[/api/bond_info] 补充实时价格失败 bond_code=%s err=%s", bond_code, _pe)
+
+    # 实时补充剩余规模（从东方财富全量缓存读，不写 DB）
+    try:
+        all_remaining = fetch_all_cb_remaining()
+        info["剩余规模"] = all_remaining.get(bond_code.strip())
+    except Exception as _re:
+        logger.warning("[/api/bond_info] 补充剩余规模失败 bond_code=%s err=%s", bond_code, _re)
+
+    # 获取转股价调整记录
+    try:
+        adj_logs = get_bond_adj_logs(bond_code)
+        info["has_adj_logs"] = len(adj_logs) > 0
+    except Exception:
+        info["has_adj_logs"] = False
 
     # ── 写入 DB ───────────────────────────────────────────────────────────────
     try:
@@ -410,7 +457,7 @@ def api_bond_info():
     except Exception as _e:
         logger.warning("[/api/bond_info] 写入 DB 失败（不影响返回）bond_code=%s err=%s", bond_code, _e)
 
-    logger.info("[/api/bond_info] 返回基础信息 bond_code=%s name=%s", bond_code, info.get("债券简称", ""))
+    logger.info("[/api/bond_info] 返回基础信息 bond_code=%s name=%s has_adj=%s", bond_code, info.get("债券简称", ""), info.get("has_adj_logs"))
     _attach_cashflows(info)
     return jsonify({"success": True, "data": info})
 
@@ -467,6 +514,11 @@ def api_bond_list():
                     # 从 t_bond_daily / t_stock_daily 获取最新高频变动数据
                     daily_snapshot = query_latest_daily_snapshot()
                     stock_snapshot = query_latest_stock_snapshot()
+                    # 加载持仓数据
+                    try:
+                        positions_map = {str(p["bond_code"]): p for p in query_positions()}
+                    except Exception:
+                        positions_map = {}
 
                     records = []
                     missing_detail_codes = []  # listing_date 为空的，需后台补全
@@ -481,16 +533,69 @@ def api_bond_list():
                         convert_value = None
                         if stock_price and conv_price and conv_price > 0:
                             convert_value = round(float(stock_price) / conv_price * 100, 4)
+                        # 检查是否有转股价下调记录（本地缓存）
+                        adj_cached = read_local_cache(f"adj_logs:{code}")
+                        has_adj_logs = adj_cached is not None and len(adj_cached) > 0
+                        # 付息日列表
+                        pay_dates = []
+                        if r.get("coupon_pay_dates"):
+                            try:
+                                pay_dates = json.loads(r["coupon_pay_dates"])
+                            except Exception:
+                                pass
+                        # 计算双低值 = 债现价 + 转股溢价率（%）
+                        bond_price = prices.get("债现价")
+                        premium_rate = prices.get("转股溢价率")
+                        double_low = None
+                        if bond_price is not None and premium_rate is not None:
+                            double_low = round(float(bond_price) + float(premium_rate), 2)
+                        # 距离强赎线（%）= 转股价值 / 130 * 100
+                        redeem_progress = None
+                        if convert_value is not None and convert_value > 0:
+                            redeem_progress = round(convert_value / 130 * 100, 1)
+                        # 下修博弈标记：剩余年限<=2年且转股价值<80，或债现价<100且溢价率>30
+                        xiuzheng = False
+                        remain_years = None
+                        if r.get("expire_date"):
+                            try:
+                                from datetime import datetime as _dt
+                                expire_dt = _dt.strptime(str(r["expire_date"])[:10], "%Y-%m-%d")
+                                remain_years = (expire_dt - now).days / 365.25
+                            except Exception:
+                                pass
+                        if remain_years is not None and remain_years <= 2:
+                            if convert_value is not None and convert_value < 80:
+                                xiuzheng = True
+                        if bond_price is not None and bond_price < 100 and premium_rate is not None and premium_rate > 30:
+                            xiuzheng = True
+
+                        pos = positions_map.get(code)
+                        position_info = None
+                        if pos and bond_price is not None:
+                            market_value = float(bond_price) * int(pos["quantity"]) * 10  # 1张=100元，价格*数量*10
+                            cost = float(pos["cost_price"]) * int(pos["quantity"]) * 10
+                            pnl = round(market_value - cost, 2)
+                            pnl_pct = round(pnl / cost * 100, 2) if cost else 0
+                            position_info = {
+                                "cost_price": float(pos["cost_price"]),
+                                "quantity": int(pos["quantity"]),
+                                "market_value": round(market_value, 2),
+                                "pnl": pnl,
+                                "pnl_pct": pnl_pct,
+                            }
                         records.append({
                             "债券代码":   code,
                             "债券简称":   r["bond_name"] or "",
-                            "债现价":     prices.get("债现价"),
+                            "债现价":     bond_price,
                             "正股代码":   str(r["stock_code"] or "").zfill(6) if r["stock_code"] else "",
                             "正股简称":   r["stock_name"] or "",
                             "正股价":     prices.get("正股价"),
-                            "转股溢价率": prices.get("转股溢价率"),
+                            "转股溢价率": premium_rate,
                             "转股价":     conv_price,
                             "转股价值":   convert_value,
+                            "双低值":     double_low,
+                            "距离强赎线": redeem_progress,
+                            "下修博弈":   xiuzheng,
                             "信用评级":   decode_credit_rating(r["credit_rating"]),
                             "剩余规模":   round(r["issue_size"] / 100, 2) if r["issue_size"] else None,
                             "发行规模":   round(r["issue_size_original"] / 100, 2) if r.get("issue_size_original") else None,
@@ -501,6 +606,10 @@ def api_bond_list():
                             "正股市值":   stock.get("stock_market_cap"),
                             "强赎状态":   r.get("strong_redeem_status") or "",
                             "回售状态":   r.get("putback_status") or "",
+                            "地区":       r.get("region") or "",
+                            "has_adj_logs": has_adj_logs,
+                            "付息日列表": pay_dates,
+                            "持仓":       position_info,
                         })
                         if not r.get("listing_date") or not r.get("bond_name"):
                             missing_detail_codes.append(r["bond_code"])
@@ -535,7 +644,7 @@ def api_bond_list():
     if not cols:
         cols = list(df.columns[:4])
     records = df[cols].to_dict(orient="records")
-    # 添加转股价值计算
+    # 添加转股价值、双低值、距离强赎线、下修博弈计算
     for row in records:
         stock_price = row.get("正股价")
         conv_price = row.get("转股价")
@@ -543,11 +652,65 @@ def api_bond_list():
             row["转股价值"] = round(float(stock_price) / float(conv_price) * 100, 4)
         else:
             row["转股价值"] = None
-    # 清理 NaN / Inf
+        # 双低值
+        bond_price = row.get("债现价")
+        premium_rate = row.get("转股溢价率")
+        if bond_price is not None and premium_rate is not None:
+            row["双低值"] = round(float(bond_price) + float(premium_rate), 2)
+        else:
+            row["双低值"] = None
+        # 距离强赎线
+        convert_value = row.get("转股价值")
+        if convert_value is not None and convert_value > 0:
+            row["距离强赎线"] = round(convert_value / 130 * 100, 1)
+        else:
+            row["距离强赎线"] = None
+        # 下修博弈
+        xiuzheng = False
+        remain_years = None
+        expire_date = row.get("到期日期")
+        if expire_date and len(str(expire_date)) == 8:
+            try:
+                expire_dt = datetime.strptime(str(expire_date), "%Y%m%d")
+                remain_years = (expire_dt - now).days / 365.25
+            except Exception:
+                pass
+        if remain_years is not None and remain_years <= 2:
+            if convert_value is not None and convert_value < 80:
+                xiuzheng = True
+        if bond_price is not None and bond_price < 100 and premium_rate is not None and premium_rate > 30:
+            xiuzheng = True
+        row["下修博弈"] = xiuzheng
+    # 加载持仓数据并合并
+    try:
+        positions_map2 = {str(p["bond_code"]): p for p in query_positions()}
+    except Exception:
+        positions_map2 = {}
+    for row in records:
+        code2 = str(row.get("债券代码", ""))
+        pos2 = positions_map2.get(code2)
+        bond_price2 = row.get("债现价")
+        if pos2 and bond_price2 is not None:
+            mv = float(bond_price2) * int(pos2["quantity"]) * 10
+            cost2 = float(pos2["cost_price"]) * int(pos2["quantity"]) * 10
+            pnl2 = round(mv - cost2, 2)
+            pnl_pct2 = round(pnl2 / cost2 * 100, 2) if cost2 else 0
+            row["持仓"] = {
+                "cost_price": float(pos2["cost_price"]),
+                "quantity": int(pos2["quantity"]),
+                "market_value": round(mv, 2),
+                "pnl": pnl2,
+                "pnl_pct": pnl_pct2,
+            }
+        else:
+            row["持仓"] = None
+    # 清理 NaN / Inf，补充默认字段
     for row in records:
         for k, v in row.items():
             if isinstance(v, float) and (math.isnan(v) or math.isinf(v)):
                 row[k] = None
+        row.setdefault("has_adj_logs", False)
+        row.setdefault("付息日列表", [])
 
     # ── 批量写入 DB ───────────────────────────────────────────────────────────
     all_bond_codes = []
@@ -720,10 +883,24 @@ def api_stock_financials():
             _has_income = _a0.get("gross_profit") is not None
             if age < _STOCK_FINANCIALS_DB_TTL and (cached_annual or cached_quarterly) and _has_sina and _has_income:
                 logger.info("[/api/stock_financials] DB 缓存命中 stock_code=%s age=%.0fs", stock_code, age)
+                profile = json.loads(cached["profile_json"] or "{}")
+                # 同步地区到 t_bond_info（若存在）
+                try:
+                    region = profile.get("region", "")
+                    if region:
+                        from bond.db import get_conn
+                        conn = get_conn()
+                        conn.execute(
+                            "UPDATE t_bond_info SET region = ? WHERE stock_code = ?",
+                            (region, int(stock_code)),
+                        )
+                        conn.commit()
+                except Exception as _re:
+                    logger.warning("[/api/stock_financials] 同步地区到 t_bond_info 失败 stock_code=%s err=%s", stock_code, _re)
                 return jsonify({
                     "success": True,
                     "data": {
-                        "profile":   json.loads(cached["profile_json"] or "{}"),
+                        "profile":   profile,
                         "annual":    cached_annual,
                         "quarterly": cached_quarterly,
                     },
@@ -775,6 +952,20 @@ def api_stock_financials():
         profile.setdefault("list_date", "")
         profile.setdefault("soe_type",  "")
     logger.info("[/api/stock_financials] 公司档案解析结果 stock_code=%s profile=%s", stock_code, profile)
+
+    # 将地区信息同步回 t_bond_info（供列表页黑名单判断使用）
+    try:
+        region = profile.get("region", "")
+        if region:
+            from bond.db import get_conn
+            conn = get_conn()
+            conn.execute(
+                "UPDATE t_bond_info SET region = ? WHERE stock_code = ?",
+                (region, int(stock_code)),
+            )
+            conn.commit()
+    except Exception as _re:
+        logger.warning("[/api/stock_financials] 同步地区到 t_bond_info 失败 stock_code=%s err=%s", stock_code, _re)
 
     # 3. 年度财务（近4年，取最新4条）
     annual = []
@@ -1043,6 +1234,143 @@ def api_stock_news():
     results.sort(key=lambda x: x.get("date", ""), reverse=True)
 
     return jsonify({"success": True, "data": results[:30]})
+
+
+# ── 持仓接口 ──────────────────────────────────────────────────────────────────
+
+@app.route("/api/positions", methods=["GET"])
+def api_positions():
+    """查询所有持仓"""
+    try:
+        positions = query_positions()
+        return jsonify({"success": True, "data": positions})
+    except Exception as e:
+        logger.warning("[/api/positions] 查询失败 err=%s", e)
+        return jsonify({"success": False, "message": str(e)}), 500
+
+
+@app.route("/api/position", methods=["POST"])
+def api_position_post():
+    """添加/更新持仓"""
+    data = request.get_json() or {}
+    bond_code = data.get("bond_code")
+    bond_name = data.get("bond_name", "")
+    cost_price = data.get("cost_price")
+    quantity = data.get("quantity")
+    if not bond_code or cost_price is None or quantity is None:
+        return jsonify({"success": False, "message": "请传入 bond_code, cost_price, quantity"}), 400
+    try:
+        upsert_position(int(bond_code), str(bond_name), float(cost_price), int(quantity))
+        return jsonify({"success": True})
+    except Exception as e:
+        logger.warning("[/api/position] 写入失败 bond_code=%s err=%s", bond_code, e)
+        return jsonify({"success": False, "message": str(e)}), 500
+
+
+@app.route("/api/position", methods=["DELETE"])
+def api_position_delete():
+    """删除持仓"""
+    bond_code = request.args.get("bond_code", "").strip()
+    if not bond_code:
+        return jsonify({"success": False, "message": "请传入 bond_code"}), 400
+    try:
+        delete_position(int(bond_code))
+        return jsonify({"success": True})
+    except Exception as e:
+        logger.warning("[/api/position] 删除失败 bond_code=%s err=%s", bond_code, e)
+        return jsonify({"success": False, "message": str(e)}), 500
+
+
+# ── 预警接口 ──────────────────────────────────────────────────────────────────
+
+@app.route("/api/alerts", methods=["GET"])
+def api_alerts():
+    """查询预警规则，可指定 bond_code"""
+    bond_code = request.args.get("bond_code", "").strip()
+    try:
+        alerts = query_alerts(int(bond_code) if bond_code else None)
+        return jsonify({"success": True, "data": alerts})
+    except Exception as e:
+        logger.warning("[/api/alerts] 查询失败 err=%s", e)
+        return jsonify({"success": False, "message": str(e)}), 500
+
+
+@app.route("/api/alert", methods=["POST"])
+def api_alert_post():
+    """添加预警规则"""
+    data = request.get_json() or {}
+    bond_code = data.get("bond_code")
+    alert_type = data.get("alert_type")
+    operator = data.get("operator")
+    threshold = data.get("threshold")
+    if not bond_code or not alert_type or not operator or threshold is None:
+        return jsonify({"success": False, "message": "请传入 bond_code, alert_type, operator, threshold"}), 400
+    try:
+        alert_id = add_alert(int(bond_code), str(alert_type), str(operator), float(threshold))
+        return jsonify({"success": True, "data": {"id": alert_id}})
+    except Exception as e:
+        logger.warning("[/api/alert] 写入失败 err=%s", e)
+        return jsonify({"success": False, "message": str(e)}), 500
+
+
+@app.route("/api/alert", methods=["DELETE"])
+def api_alert_delete():
+    """删除预警规则"""
+    alert_id = request.args.get("id", "").strip()
+    if not alert_id:
+        return jsonify({"success": False, "message": "请传入 id"}), 400
+    try:
+        delete_alert(int(alert_id))
+        return jsonify({"success": True})
+    except Exception as e:
+        logger.warning("[/api/alert] 删除失败 id=%s err=%s", alert_id, e)
+        return jsonify({"success": False, "message": str(e)}), 500
+
+
+# ── 笔记接口 ──────────────────────────────────────────────────────────────────
+
+@app.route("/api/note", methods=["GET"])
+def api_note_get():
+    """查询单只债券笔记"""
+    bond_code = request.args.get("bond_code", "").strip()
+    if not bond_code:
+        return jsonify({"success": False, "message": "请传入 bond_code"}), 400
+    try:
+        note = query_note(int(bond_code))
+        return jsonify({"success": True, "data": note})
+    except Exception as e:
+        logger.warning("[/api/note] 查询失败 bond_code=%s err=%s", bond_code, e)
+        return jsonify({"success": False, "message": str(e)}), 500
+
+
+@app.route("/api/note", methods=["POST"])
+def api_note_post():
+    """保存笔记"""
+    data = request.get_json() or {}
+    bond_code = data.get("bond_code")
+    content = data.get("content", "")
+    if not bond_code:
+        return jsonify({"success": False, "message": "请传入 bond_code"}), 400
+    try:
+        upsert_note(int(bond_code), str(content))
+        return jsonify({"success": True})
+    except Exception as e:
+        logger.warning("[/api/note] 写入失败 bond_code=%s err=%s", bond_code, e)
+        return jsonify({"success": False, "message": str(e)}), 500
+
+
+@app.route("/api/note", methods=["DELETE"])
+def api_note_delete():
+    """删除笔记"""
+    bond_code = request.args.get("bond_code", "").strip()
+    if not bond_code:
+        return jsonify({"success": False, "message": "请传入 bond_code"}), 400
+    try:
+        delete_note(int(bond_code))
+        return jsonify({"success": True})
+    except Exception as e:
+        logger.warning("[/api/note] 删除失败 bond_code=%s err=%s", bond_code, e)
+        return jsonify({"success": False, "message": str(e)}), 500
 
 
 if __name__ == "__main__":
