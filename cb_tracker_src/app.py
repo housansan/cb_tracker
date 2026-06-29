@@ -1009,6 +1009,13 @@ def api_stock_financials():
         "流动资产合计":  "current_assets",
         "流动负债合计":  "current_liab",
         "非流动负债合计": "noncurrent_liab",
+        "应收账款":    "accounts_receivable",
+        "其他应收款":   "other_receivable",
+        "资产总计":    "total_assets",
+        "短期借款":    "short_term_debt",
+        "长期借款":    "long_term_debt",
+        "应付债券":    "bonds_payable",
+        "一年内到期的非流动负债": "current_portion_long_debt",
     }
     try:
         sina_df = ak.stock_financial_report_sina(stock=_sina_symbol, symbol="资产负债表")
@@ -1153,6 +1160,14 @@ def api_stock_financials():
             row["current_assets"]  = entry.get("current_assets")
             row["current_liab"]    = entry.get("current_liab")
             row["noncurrent_liab"] = entry.get("noncurrent_liab")
+            # 新增字段
+            row["accounts_receivable"]     = entry.get("accounts_receivable")
+            row["other_receivable"]        = entry.get("other_receivable")
+            row["total_assets"]            = entry.get("total_assets")
+            row["short_term_debt"]         = entry.get("short_term_debt")
+            row["long_term_debt"]          = entry.get("long_term_debt")
+            row["bonds_payable"]           = entry.get("bonds_payable")
+            row["current_portion_long_debt"] = entry.get("current_portion_long_debt")
             row["op_cashflow_total"] = _cf_map.get(key)
             # 利润表字段
             inc = _income_map.get(key, {})

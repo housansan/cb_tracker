@@ -5,7 +5,7 @@ async function loadBondInfo(bondCode) {
   document.getElementById("infoContent").innerHTML = '<div class="info-loading">正在加载基础信息...</div>';
   document.getElementById("infoUpdateTime").textContent = "";
   try {
-    const res  = await fetch(`/api/bond_info?bond_code=${encodeURIComponent(bondCode)}`);
+    const res = await fetch(`/api/bond_info?bond_code=${encodeURIComponent(bondCode)}`);
     const json = await res.json();
     if (!json.success) {
       document.getElementById("infoContent").innerHTML = `<div class="info-error">⚠ ${json.message}</div>`;
@@ -15,13 +15,13 @@ async function loadBondInfo(bondCode) {
     // 显示 Tab 区，重置加载状态
     document.getElementById('detailTabsSection').style.display = '';
     // 保存正股代码到 data attribute 供 Tab 切换时使用
-    document.getElementById('detailTabsSection').dataset.stockCode  = json.data["正股代码"] || "";
-    document.getElementById('detailTabsSection').dataset.stockPrice = json.data["正股价"]   || "";
+    document.getElementById('detailTabsSection').dataset.stockCode = json.data["正股代码"] || "";
+    document.getElementById('detailTabsSection').dataset.stockPrice = json.data["正股价"] || "";
     _couponLoaded = false;
-    _adjLoaded    = false;
-    _stockLoaded  = false;
-    _newsLoaded   = false;
-    _noteLoaded   = false;
+    _adjLoaded = false;
+    _stockLoaded = false;
+    _newsLoaded = false;
+    _noteLoaded = false;
     // 若当前有激活的 tab，重新加载对应数据
     if (_activeTab === 'coupon') loadCouponInfo(bondCode);
     else if (_activeTab === 'adj') loadAdjLogs(bondCode);
@@ -36,10 +36,10 @@ async function loadBondInfo(bondCode) {
     else if (_activeTab === 'note') loadNote(bondCode);
     const now = new Date();
     document.getElementById("infoUpdateTime").textContent =
-      `更新于 ${now.getHours().toString().padStart(2,'0')}:${now.getMinutes().toString().padStart(2,'0')}`;
+      `更新于 ${now.getHours().toString().padStart(2, '0')}:${now.getMinutes().toString().padStart(2, '0')}`;
     // 用上市/退市日期自动填充日期框
     const listingDate = json.data["上市日期"] || "";
-    const delistDate  = json.data["退市日期"] || "";
+    const delistDate = json.data["退市日期"] || "";
     if (listingDate) {
       document.getElementById("start_date").value = listingDate.replace(/(\d{4})(\d{2})(\d{2})/, "$1-$2-$3");
     }
@@ -52,12 +52,12 @@ async function loadBondInfo(bondCode) {
 }
 
 function renderBondInfo(d) {
-  const premium      = parseFloat(d["转股溢价率"] || 0);
+  const premium = parseFloat(d["转股溢价率"] || 0);
   const premiumClass = premium >= 0 ? "premium-pos" : "premium-neg";
-  const premiumText  = (premium >= 0 ? "+" : "") + premium.toFixed(2) + "%";
-  const fmtDate8     = s => s ? s.replace(/(\d{4})(\d{2})(\d{2})/, "$1-$2-$3") : "-";
-  const expireDate   = (d["付息信息"] || {})["到期日"] || "";
-  const rating       = d["信用评级"] || "";
+  const premiumText = (premium >= 0 ? "+" : "") + premium.toFixed(2) + "%";
+  const fmtDate8 = s => s ? s.replace(/(\d{4})(\d{2})(\d{2})/, "$1-$2-$3") : "-";
+  const expireDate = (d["付息信息"] || {})["到期日"] || "";
+  const rating = d["信用评级"] || "";
 
   // ① Header：名称 + 代码 + 评级 badge
   const headerHtml = `
@@ -69,10 +69,10 @@ function renderBondInfo(d) {
 
   // ② KPI 横排：4 个核心指标大字号显示
   const kpis = [
-    { label: "债券现价",   val: parseFloat(d["债现价"]   || 0).toFixed(3), unit: "元",  cls: "price" },
-    { label: "转股溢价率", val: premiumText,                                unit: "",   cls: premiumClass },
-    { label: "转股价值",   val: parseFloat(d["转股价值"] || 0).toFixed(3), unit: "元",  cls: "" },
-    { label: "剩余规模",   val: d["剩余规模"] != null ? parseFloat(d["剩余规模"]).toFixed(2) : "-", unit: "亿", cls: "" },
+    { label: "债券现价", val: parseFloat(d["债现价"] || 0).toFixed(3), unit: "元", cls: "price" },
+    { label: "转股溢价率", val: premiumText, unit: "", cls: premiumClass },
+    { label: "转股价值", val: parseFloat(d["转股价值"] || 0).toFixed(3), unit: "元", cls: "" },
+    { label: "剩余规模", val: d["剩余规模"] != null ? parseFloat(d["剩余规模"]).toFixed(2) : "-", unit: "亿", cls: "" },
   ];
   const kpiHtml = `
     <div class="bdi-kpi-row">
@@ -88,7 +88,7 @@ function renderBondInfo(d) {
     {
       title: "正股",
       items: [
-        ["代码",   `${d["正股代码"] || "-"}<span class="bdi-sub">${d["正股简称"] || ""}</span>`],
+        ["代码", `${d["正股代码"] || "-"}<span class="bdi-sub">${d["正股简称"] || ""}</span>`],
         ["正股价", `<span style="color:#2e7d32;font-weight:700">${parseFloat(d["正股价"] || 0).toFixed(3)}</span> 元`],
       ],
     },
@@ -126,17 +126,17 @@ function renderBondInfo(d) {
 }
 
 // ── 详情 Tab 切换 ─────────────────────────────────────────
-let _adjLoaded    = false;  // 转股价调整记录是否已加载
-let _adjBondCode  = "";     // 已加载的债券代码
+let _adjLoaded = false;  // 转股价调整记录是否已加载
+let _adjBondCode = "";     // 已加载的债券代码
 let _couponLoaded = false;  // 付息信息是否已加载
 let _couponBondCode = "";   // 已加载付息信息的债券代码
-let _stockLoaded  = false;  // 正股财务是否已加载
-let _stockCode    = "";     // 已加载财务的正股代码
-let _newsLoaded   = false;  // 公告/热点是否已加载
+let _stockLoaded = false;  // 正股财务是否已加载
+let _stockCode = "";     // 已加载财务的正股代码
+let _newsLoaded = false;  // 公告/热点是否已加载
 let _newsStockCode = "";    // 已加载新闻的正股代码
-let _noteLoaded   = false;  // 笔记是否已加载
+let _noteLoaded = false;  // 笔记是否已加载
 let _noteBondCode = "";     // 已加载笔记的债券代码
-let _activeTab    = "";     // 当前激活的 tab
+let _activeTab = "";     // 当前激活的 tab
 
 function switchDetailTab(tab) {
   document.getElementById('tabBtnCoupon').classList.toggle('active', tab === 'coupon');
@@ -178,12 +178,12 @@ function switchDetailTab(tab) {
 async function loadCouponInfo(bondCode) {
   if (!bondCode) return;
   _couponBondCode = bondCode;
-  _couponLoaded   = false;
-  document.getElementById('couponLoading').style.display  = 'block';
-  document.getElementById('couponLoading').textContent    = '正在加载付息信息...';
-  document.getElementById('couponBody').innerHTML         = '';
+  _couponLoaded = false;
+  document.getElementById('couponLoading').style.display = 'block';
+  document.getElementById('couponLoading').textContent = '正在加载付息信息...';
+  document.getElementById('couponBody').innerHTML = '';
   try {
-    const res  = await fetch(`/api/bond_info?bond_code=${encodeURIComponent(bondCode)}`);
+    const res = await fetch(`/api/bond_info?bond_code=${encodeURIComponent(bondCode)}`);
     const json = await res.json();
     if (!json.success) {
       document.getElementById('couponLoading').textContent = `⚠ ${json.message}`;
@@ -200,12 +200,12 @@ async function loadCouponInfo(bondCode) {
 async function loadAdjLogs(bondCode) {
   if (!bondCode) return;
   _adjBondCode = bondCode;
-  _adjLoaded   = false;
-  document.getElementById('adjLoading').style.display  = 'block';
-  document.getElementById('adjLoading').textContent    = '正在加载转股价调整记录...';
-  document.getElementById('adjBody').innerHTML         = '';
+  _adjLoaded = false;
+  document.getElementById('adjLoading').style.display = 'block';
+  document.getElementById('adjLoading').textContent = '正在加载转股价调整记录...';
+  document.getElementById('adjBody').innerHTML = '';
   try {
-    const res  = await fetch(`/api/bond_adj_logs?bond_code=${encodeURIComponent(bondCode)}`);
+    const res = await fetch(`/api/bond_adj_logs?bond_code=${encodeURIComponent(bondCode)}`);
     const json = await res.json();
     if (!json.success) {
       document.getElementById('adjLoading').textContent = `⚠ ${json.message}`;
@@ -225,7 +225,7 @@ function renderAdjLogs(records) {
     body.innerHTML = '<div class="adj-empty">📭 暂无转股价调整记录</div>';
     return;
   }
-  const cols  = Object.keys(records[0]);
+  const cols = Object.keys(records[0]);
   const thead = `<tr>${cols.map(c => `<th>${c}</th>`).join('')}</tr>`;
   const tbody = records.map(row => {
     const tds = cols.map(c => {
@@ -250,12 +250,12 @@ function renderCouponInfo(ci) {
     return;
   }
 
-  const fmtD  = s => s ? s.replace(/(\d{4})(\d{2})(\d{2})/, '$1-$2-$3') : '-';
+  const fmtD = s => s ? s.replace(/(\d{4})(\d{2})(\d{2})/, '$1-$2-$3') : '-';
   const today = new Date().toISOString().slice(0, 10).replace(/-/g, '');
 
-  const payDates    = ci['付息日列表'];
-  const rates       = ci['票息率列表'] || [];
-  const lastIdx     = payDates.length - 1;
+  const payDates = ci['付息日列表'];
+  const rates = ci['票息率列表'] || [];
+  const lastIdx = payDates.length - 1;
   const redeemPrice = ci['赎回价'] || '-';
 
   const rateDesc = ci['利率说明'] || '';
@@ -270,18 +270,18 @@ function renderCouponInfo(ci) {
 
   let nextFound = false;
   const rows = payDates.map((d, i) => {
-    const rate   = rates[i] != null ? rates[i].toFixed(2) + '%' : '-';
+    const rate = rates[i] != null ? rates[i].toFixed(2) + '%' : '-';
     const coupon = rates[i] != null ? rates[i].toFixed(2) + ' 元' : '-';
     const isLast = i === lastIdx;
     const isPast = d < today;
-    let rowCls   = '';
-    if (isLast)       rowCls = 'last-row';
-    else if (isPast)  rowCls = 'past-row';
+    let rowCls = '';
+    if (isLast) rowCls = 'last-row';
+    else if (isPast) rowCls = 'past-row';
     else if (!nextFound && d !== today) { nextFound = true; rowCls = 'next-row'; }
     const cashflow = isLast
       ? `<span style="color:#e53935;font-weight:600">${redeemPrice} 元（含利息）</span>`
       : coupon;
-    const status      = isPast ? '已付' : (d === today ? '今日' : '待付');
+    const status = isPast ? '已付' : (d === today ? '今日' : '待付');
     const statusStyle = isPast ? 'color:#bbb' : (d === today ? 'color:#2e7d32;font-weight:600' : 'color:#3949ab');
     return `<tr class="${rowCls}">
       <td>${i + 1}</td>
@@ -309,15 +309,15 @@ let _sfMode = 'annual';  // 'annual' | 'quarterly'
 
 async function loadStockFinancials(stockCode) {
   if (!stockCode) return;
-  _stockCode   = stockCode;
+  _stockCode = stockCode;
   _stockLoaded = false;
   const loadEl = document.getElementById('sfLoading');
   const bodyEl = document.getElementById('sfBody');
   loadEl.style.display = 'block';
-  loadEl.textContent   = '正在加载正股财务数据...';
-  bodyEl.innerHTML     = '';
+  loadEl.textContent = '正在加载正股财务数据...';
+  bodyEl.innerHTML = '';
   try {
-    const res  = await fetch(`/api/stock_financials?stock_code=${encodeURIComponent(stockCode)}`);
+    const res = await fetch(`/api/stock_financials?stock_code=${encodeURIComponent(stockCode)}`);
     const json = await res.json();
     if (!json.success) {
       loadEl.textContent = `⚠ ${json.message}`;
@@ -332,8 +332,8 @@ async function loadStockFinancials(stockCode) {
 }
 
 function renderStockFinancials(data, stockCode) {
-  const profile   = data.profile   || {};
-  const annual    = data.annual    || [];
+  const profile = data.profile || {};
+  const annual = data.annual || [];
   const quarterly = data.quarterly || [];
 
   // THS 财务摘要接口无货币资金字段，覆盖率分析不显示
@@ -341,7 +341,7 @@ function renderStockFinancials(data, stockCode) {
 
   // ② 公司档案横排
   const soeType = profile.soe_type || '';
-  const soeCls  = soeType.includes('国') ? 'sf-badge-soe' : (soeType ? 'sf-badge-private' : 'sf-badge-unknown');
+  const soeCls = soeType.includes('国') ? 'sf-badge-soe' : (soeType ? 'sf-badge-private' : 'sf-badge-unknown');
   const soeHtml = soeType ? `<span class="sf-badge ${soeCls}">${soeType}</span>` : '';
   // PB = 正股价 ÷ 最新每股净资产
   const stockPrice = parseFloat(document.getElementById('detailTabsSection').dataset.stockPrice || '0');
@@ -357,17 +357,17 @@ function renderStockFinancials(data, stockCode) {
     // 现金比率
     if (latest.monetary_funds != null && latest.current_liab != null && latest.current_liab > 0) {
       const cr = latest.monetary_funds / latest.current_liab;
-      if (cr < 0.2)      { _stressScore += 2; _stressDetail.push('现金比率<0.2'); }
+      if (cr < 0.2) { _stressScore += 2; _stressDetail.push('现金比率<0.2'); }
       else if (cr < 0.5) { _stressScore += 1; _stressDetail.push('现金比率<0.5'); }
     }
     // 经营现金流净额
     if (latest.op_cashflow_total != null) {
-      if (latest.op_cashflow_total < 0)    { _stressScore += 2; _stressDetail.push('经营现金流为负'); }
+      if (latest.op_cashflow_total < 0) { _stressScore += 2; _stressDetail.push('经营现金流为负'); }
       else if (latest.op_cashflow_total < 1) { _stressScore += 1; _stressDetail.push('经营现金流偏低'); }
     }
     // 资产负债率
     if (latest.debt_ratio != null) {
-      if (latest.debt_ratio >= 85)      { _stressScore += 2; _stressDetail.push('负债率≥85%'); }
+      if (latest.debt_ratio >= 85) { _stressScore += 2; _stressDetail.push('负债率≥85%'); }
       else if (latest.debt_ratio >= 70) { _stressScore += 1; _stressDetail.push('负债率≥70%'); }
     }
     // 利息覆盖率（经营利润÷财务费用）—— 利息费用为负时表示支出，取绝对值
@@ -381,7 +381,7 @@ function renderStockFinancials(data, stockCode) {
   if (_stressScore > 0) {
     const stressLevel = _stressScore >= 4 ? 'high' : _stressScore >= 2 ? 'mid' : 'low';
     const stressLabel = _stressScore >= 4 ? '融资压力：高' : _stressScore >= 2 ? '融资压力：中' : '融资压力：低';
-    const stressTip   = _stressDetail.join('、');
+    const stressTip = _stressDetail.join('、');
     stressHtml = `<span class="sf-badge sf-badge-stress sf-badge-stress-${stressLevel}" title="${stressTip}">⚠ ${stressLabel}</span>`;
   }
 
@@ -395,8 +395,8 @@ function renderStockFinancials(data, stockCode) {
   const profileHtml = `
     <div class="sf-profile">
       ${profile.name ? `<span class="sf-badge sf-badge-name">${profile.name}</span>` : ''}
-      ${stockCode    ? `<span class="sf-badge sf-badge-code">${stockCode}</span>` : ''}
-      ${profile.region   ? `<span class="sf-badge sf-badge-region">📍 ${profile.region}</span>` : ''}
+      ${stockCode ? `<span class="sf-badge sf-badge-code">${stockCode}</span>` : ''}
+      ${profile.region ? `<span class="sf-badge sf-badge-region">📍 ${profile.region}</span>` : ''}
       ${profile.industry ? `<span class="sf-badge sf-badge-industry">🏭 ${profile.industry}</span>` : ''}
       ${soeHtml}
       ${profile.list_date ? `<span class="sf-badge sf-badge-date">上市 ${profile.list_date}</span>` : ''}
@@ -426,7 +426,7 @@ function sfSwitchMode(mode) {
   });
   // 重新获取已缓存的数据并重渲染表格
   const loadEl = document.getElementById('sfLoading');
-  const wrap   = document.getElementById('sfTableWrap');
+  const wrap = document.getElementById('sfTableWrap');
   if (!wrap) return;
   // 触发重新请求（数据已缓存，很快）
   const sc = document.getElementById('detailTabsSection').dataset.stockCode || "";
@@ -438,7 +438,7 @@ function sfSwitchMode(mode) {
       const rows = mode === 'annual' ? (json.data.annual || []) : (json.data.quarterly || []);
       wrap.innerHTML = buildSfTable(rows, mode);
     })
-    .catch(() => {});
+    .catch(() => { });
 }
 
 function fmtBillion(v) {
@@ -464,100 +464,163 @@ function buildSfTable(rows, mode) {
 
   // 行定义
   const metrics = [
-    { key: 'revenue',        label: '营业收入',         fmt: v => fmtBillion(v) + ' 亿', cls: '' },
-    { key: 'net_profit',     label: '净利润',           fmt: v => fmtBillion(v) + ' 亿', cls: row => row.net_profit != null && row.net_profit < 0 ? 'sf-neg' : 'sf-pos' },
-    { key: '_margin',        label: '净利润率',         fmt: (v, row) => {
+    { key: 'revenue', label: '营业收入', fmt: v => fmtBillion(v) + ' 亿', cls: '' },
+    { key: 'net_profit', label: '净利润', fmt: v => fmtBillion(v) + ' 亿', cls: row => row.net_profit != null && row.net_profit < 0 ? 'sf-neg' : 'sf-pos' },
+    {
+      key: '_margin', label: '净利润率', fmt: (v, row) => {
         if (row.revenue && row.net_profit != null && row.revenue !== 0) {
           const m = (row.net_profit / row.revenue) * 100;
           return `<span class="${m < 0 ? 'sf-neg' : ''}">${m.toFixed(2)}%</span>`;
         }
         return '-';
-      }, isHtml: true },
-    { key: 'roe',            label: 'ROE',              fmt: v => fmtPct(v), cls: v => v != null && v < 0 ? 'sf-neg' : '' },
-    { key: 'debt_ratio',     label: '资产负债率',       fmt: v => fmtPct(v), cls: v => v != null ? (v >= 85 ? 'sf-danger' : v >= 70 ? 'sf-warn' : '') : '' },
+      }, isHtml: true
+    },
+    { key: 'roe', label: 'ROE', fmt: v => fmtPct(v), cls: v => v != null && v < 0 ? 'sf-neg' : '' },
+    { key: 'debt_ratio', label: '资产负债率', fmt: v => fmtPct(v), cls: v => v != null ? (v >= 85 ? 'sf-danger' : v >= 70 ? 'sf-warn' : '') : '' },
     // THS摘要无现金流总额，显示每股经营现金流（元）
-    { key: 'op_cashflow',    label: '每股经营现金流',   fmt: v => v != null ? (v >= 0 ? '+' : '') + v.toFixed(2) + ' 元' : '-', cls: v => v != null ? (v < 0 ? 'sf-neg' : 'sf-pos') : '' },
+    { key: 'op_cashflow', label: '每股经营现金流', fmt: v => v != null ? (v >= 0 ? '+' : '') + v.toFixed(2) + ' 元' : '-', cls: v => v != null ? (v < 0 ? 'sf-neg' : 'sf-pos') : '' },
     // 以下三行来自新浪资产负债表（单位：亿，已在后端换算）
-    { key: 'monetary_funds',  label: '货币资金',         fmt: v => v != null ? fmtBillion(v) + ' 亿' : '-', cls: '' },
-    { key: 'current_liab',    label: '流动负债',         fmt: v => v != null ? fmtBillion(v) + ' 亿' : '-', cls: 'sf-liab-current' },
-    { key: 'noncurrent_liab', label: '非流动负债',       fmt: v => v != null ? fmtBillion(v) + ' 亿' : '-', cls: 'sf-liab-noncurrent' },
+    { key: 'monetary_funds', label: '货币资金', fmt: v => v != null ? fmtBillion(v) + ' 亿' : '-', cls: '' },
+    { key: 'current_liab', label: '流动负债', fmt: v => v != null ? fmtBillion(v) + ' 亿' : '-', cls: 'sf-liab-current' },
+    { key: 'noncurrent_liab', label: '非流动负债', fmt: v => v != null ? fmtBillion(v) + ' 亿' : '-', cls: 'sf-liab-noncurrent' },
+    // 新增：资产负债表详细字段
+    { key: 'accounts_receivable', label: '应收账款', fmt: v => v != null ? fmtBillion(v) + ' 亿' : '-', cls: '' },
+    { key: 'other_receivable', label: '其他应收款', fmt: v => v != null ? fmtBillion(v) + ' 亿' : '-', cls: '' },
+    { key: 'total_assets', label: '总资产', fmt: v => v != null ? fmtBillion(v) + ' 亿' : '-', cls: '' },
+    { key: 'short_term_debt', label: '短期借款', fmt: v => v != null ? fmtBillion(v) + ' 亿' : '-', cls: '' },
+    { key: 'long_term_debt', label: '长期借款', fmt: v => v != null ? fmtBillion(v) + ' 亿' : '-', cls: '' },
+    { key: 'bonds_payable', label: '应付债券', fmt: v => v != null ? fmtBillion(v) + ' 亿' : '-', cls: '' },
     // 营收同比增长率（前端计算，annual: rows[i] vs rows[i+1]，quarterly: rows[i] vs rows[i+4]）
-    { key: '_revenue_yoy', label: '营收同比',
+    {
+      key: '_revenue_yoy', label: '营收同比',
       fmt: (v, row, idx) => {
         const prev = rows[idx + yoyStep];
         if (prev == null || prev.revenue == null || prev.revenue === 0 || row.revenue == null) return '-';
         const yoy = (row.revenue - prev.revenue) / Math.abs(prev.revenue) * 100;
         return `<span class="${yoy < 0 ? 'sf-neg' : 'sf-pos'}">${yoy >= 0 ? '+' : ''}${yoy.toFixed(2)}%</span>`;
-      }, isHtml: true, needsIdx: true },
+      }, isHtml: true, needsIdx: true
+    },
     // 净利润同比增长率
-    { key: '_profit_yoy', label: '净利润同比',
+    {
+      key: '_profit_yoy', label: '净利润同比',
       fmt: (v, row, idx) => {
         const prev = rows[idx + yoyStep];
         if (prev == null || prev.net_profit == null || prev.net_profit === 0 || row.net_profit == null) return '-';
         const yoy = (row.net_profit - prev.net_profit) / Math.abs(prev.net_profit) * 100;
         return `<span class="${yoy < 0 ? 'sf-neg' : 'sf-pos'}">${yoy >= 0 ? '+' : ''}${yoy.toFixed(2)}%</span>`;
-      }, isHtml: true, needsIdx: true },
+      }, isHtml: true, needsIdx: true
+    },
     // 经营活动现金流净额（来自新浪现金流量表，单位亿）
-    { key: 'op_cashflow_total', label: '经营现金流净额',
+    {
+      key: 'op_cashflow_total', label: '经营现金流净额',
       fmt: v => v != null ? fmtBillion(v) + ' 亿' : '-',
-      cls: v => v != null ? (v < 0 ? 'sf-neg' : 'sf-pos') : '' },
+      cls: v => v != null ? (v < 0 ? 'sf-neg' : 'sf-pos') : ''
+    },
     // 现金比率 = 货币资金 ÷ 流动负债（前端计算）
-    { key: '_cash_ratio', label: '现金比率',
+    {
+      key: '_cash_ratio', label: '现金比率',
       fmt: (v, row) => {
         if (row.monetary_funds == null || row.current_liab == null || row.current_liab === 0) return '-';
         const r = row.monetary_funds / row.current_liab;
         return `<span class="${r < 0.2 ? 'sf-danger' : r < 0.5 ? 'sf-warn' : ''}">${r.toFixed(2)}</span>`;
-      }, isHtml: true },
+      }, isHtml: true
+    },
+    // 有息负债率 = (短期借款+长期借款+应付债券+一年内到期非流动负债) ÷ 总资产 × 100%
+    {
+      key: '_interest_bearing_debt_ratio', label: '有息负债率',
+      fmt: (v, row) => {
+        const interest_debt = (row.short_term_debt || 0) + (row.long_term_debt || 0) +
+          (row.bonds_payable || 0) + (row.current_portion_long_debt || 0);
+        if (row.total_assets == null || row.total_assets === 0 || interest_debt === 0) return '-';
+        const r = (interest_debt / row.total_assets) * 100;
+        return `<span class="${r >= 50 ? 'sf-danger' : r >= 30 ? 'sf-warn' : ''}">${r.toFixed(2)}%</span>`;
+      }, isHtml: true
+    },
+    // 应收款占比 = (应收账款+其他应收款) ÷ 总资产 × 100%
+    {
+      key: '_receivables_ratio', label: '应收款占总资产',
+      fmt: (v, row) => {
+        const receivables = (row.accounts_receivable || 0) + (row.other_receivable || 0);
+        if (row.total_assets == null || row.total_assets === 0 || receivables === 0) return '-';
+        const r = (receivables / row.total_assets) * 100;
+        return `<span class="${r >= 30 ? 'sf-danger' : r >= 15 ? 'sf-warn' : ''}">${r.toFixed(2)}%</span>`;
+      }, isHtml: true
+    },
+    // 货币资金占流动负债比率（现金比率的百分比形式）
+    {
+      key: '_monetary_to_current_liab', label: '货币资金/流动负债',
+      fmt: (v, row) => {
+        if (row.monetary_funds == null || row.current_liab == null || row.current_liab === 0) return '-';
+        const r = (row.monetary_funds / row.current_liab) * 100;
+        return `<span class="${r < 20 ? 'sf-danger' : r < 50 ? 'sf-warn' : 'sf-pos'}">${r.toFixed(2)}%</span>`;
+      }, isHtml: true
+    },
     // 每股净资产（THS 摘要字段，元/股）
-    { key: 'bvps', label: '每股净资产',
+    {
+      key: 'bvps', label: '每股净资产',
       fmt: v => v != null ? v.toFixed(2) + ' 元' : '-',
-      cls: v => v != null && v < 0 ? 'sf-danger' : '' },
+      cls: v => v != null && v < 0 ? 'sf-danger' : ''
+    },
     // ── 新增 6 项 ──────────────────────────────────────────────────────────────
     // 毛利润（sina 利润表，营业收入-营业成本，亿）
-    { key: 'gross_profit', label: '毛利润',
+    {
+      key: 'gross_profit', label: '毛利润',
       fmt: v => v != null ? fmtBillion(v) + ' 亿' : '-',
-      cls: v => v != null && v < 0 ? 'sf-neg' : '' },
+      cls: v => v != null && v < 0 ? 'sf-neg' : ''
+    },
     // 毛利率（前端计算：gross_profit ÷ revenue，都是亿但量级一致可直接除）
-    { key: '_gross_margin', label: '毛利率',
+    {
+      key: '_gross_margin', label: '毛利率',
       fmt: (v, row) => {
         if (row.gross_profit == null || row.revenue == null || row.revenue === 0) return '-';
         // revenue 来自 THS，可能是万元；gross_profit 来自 sina，是亿；统一用亿来算
         const rev_bn = Math.abs(row.revenue) >= 1e4 ? row.revenue / 1e4 : row.revenue;
         const m = (row.gross_profit / rev_bn) * 100;
         return `<span class="${m < 0 ? 'sf-neg' : m >= 50 ? 'sf-pos' : ''}">${m.toFixed(2)}%</span>`;
-      }, isHtml: true },
+      }, isHtml: true
+    },
     // 扣非净利润（sina 利润表，亿）
-    { key: 'net_profit_ex', label: '扣非净利润',
+    {
+      key: 'net_profit_ex', label: '扣非净利润',
       fmt: v => v != null ? fmtBillion(v) + ' 亿' : '-',
-      cls: v => v != null && v < 0 ? 'sf-neg' : (v != null ? 'sf-pos' : '') },
+      cls: v => v != null && v < 0 ? 'sf-neg' : (v != null ? 'sf-pos' : '')
+    },
     // 利润含金量 = 经营现金流净额 ÷ 净利润（前端计算，无单位）
-    { key: '_cashflow_quality', label: '利润含金量',
+    {
+      key: '_cashflow_quality', label: '利润含金量',
       fmt: (v, row) => {
         if (row.op_cashflow_total == null || row.net_profit == null || row.net_profit === 0) return '-';
         const np_bn = Math.abs(row.net_profit) >= 1e4 ? row.net_profit / 1e4 : row.net_profit;
         const q = row.op_cashflow_total / np_bn;
         const cls = q < 0 ? 'sf-danger' : q < 0.5 ? 'sf-warn' : 'sf-pos';
         return `<span class="${cls}">${q.toFixed(2)}x</span>`;
-      }, isHtml: true },
+      }, isHtml: true
+    },
     // 流动比率 = 流动资产 ÷ 流动负债（前端计算）
-    { key: '_current_ratio', label: '流动比率',
+    {
+      key: '_current_ratio', label: '流动比率',
       fmt: (v, row) => {
         if (row.current_assets == null || row.current_liab == null || row.current_liab === 0) return '-';
         const cr = row.current_assets / row.current_liab;
         return `<span class="${cr < 1 ? 'sf-danger' : cr < 1.5 ? 'sf-warn' : 'sf-pos'}">${cr.toFixed(2)}x</span>`;
-      }, isHtml: true },
+      }, isHtml: true
+    },
     // 利息覆盖率 = 毛利润 ÷ |财务费用|（前端计算）
-    { key: '_icr', label: '利息覆盖率',
+    {
+      key: '_icr', label: '利息覆盖率',
       fmt: (v, row) => {
         if (row.gross_profit == null || row.interest_exp == null || Math.abs(row.interest_exp) === 0) return '-';
         const icr = row.gross_profit / Math.abs(row.interest_exp);
         return `<span class="${icr < 2 ? 'sf-danger' : icr < 4 ? 'sf-warn' : 'sf-pos'}">${icr.toFixed(1)}x</span>`;
-      }, isHtml: true },
+      }, isHtml: true
+    },
     // 自由现金流 = 经营现金流净额 - 资本支出（暂无capex字段，用经营现金流代替；后续可扩展）
     // 每股分红（THS 摘要字段 or 分红历史，元/股，仅第一列有值）
-    { key: 'dps', label: '每股分红',
+    {
+      key: 'dps', label: '每股分红',
       fmt: v => v != null && v > 0 ? v.toFixed(3) + ' 元/股' : '-',
-      cls: v => v != null && v > 0 ? 'sf-pos' : '' },
+      cls: v => v != null && v > 0 ? 'sf-pos' : ''
+    },
   ];
 
   const headerCells = rows.map(r => `<th>${r.period || '-'}</th>`).join('');
@@ -597,14 +660,14 @@ function buildSfTable(rows, mode) {
 async function loadStockNews(stockCode) {
   if (!stockCode) return;
   _newsStockCode = stockCode;
-  _newsLoaded    = false;
+  _newsLoaded = false;
   const loadEl = document.getElementById('newsLoading');
   const bodyEl = document.getElementById('newsBody');
   loadEl.style.display = 'block';
-  loadEl.textContent   = '正在加载公告/热点...';
-  bodyEl.innerHTML     = '';
+  loadEl.textContent = '正在加载公告/热点...';
+  bodyEl.innerHTML = '';
   try {
-    const res  = await fetch(`/api/stock_news?stock_code=${encodeURIComponent(stockCode)}`);
+    const res = await fetch(`/api/stock_news?stock_code=${encodeURIComponent(stockCode)}`);
     const json = await res.json();
     if (!json.success) {
       loadEl.textContent = `⚠ ${json.message}`;
@@ -625,9 +688,9 @@ function renderStockNews(items) {
     return;
   }
   const rows = items.map(item => {
-    const typeCls  = item.type === 'notice' ? 'news-tag-notice' : 'news-tag-news';
+    const typeCls = item.type === 'notice' ? 'news-tag-notice' : 'news-tag-news';
     const typeLabel = item.type === 'notice' ? '公告' : '新闻';
-    const dateStr  = (item.date || '').slice(0, 16);  // 最多显示 YYYY-MM-DD HH:MM
+    const dateStr = (item.date || '').slice(0, 16);  // 最多显示 YYYY-MM-DD HH:MM
     const titleHtml = item.url
       ? `<a class="news-title-link" href="${item.url}" target="_blank" rel="noopener">${item.title}</a>`
       : `<span class="news-title-text">${item.title}</span>`;
@@ -646,15 +709,15 @@ function renderStockNews(items) {
 
 // ── 目标买入价计算器 ───────────────────────────────────────────
 let _targetCashflows = [];
-let _targetTimes     = [];
-let _targetCurPrice  = 0;
+let _targetTimes = [];
+let _targetCurPrice = 0;
 
 const TARGET_PRESETS = [
-  { label: "保本",  ytm: 0   },
-  { label: "+1%",   ytm: 1   },
-  { label: "+2%",   ytm: 2   },
-  { label: "-1%",   ytm: -1  },
-  { label: "-2%",   ytm: -2  },
+  { label: "保本", ytm: 0 },
+  { label: "+1%", ytm: 1 },
+  { label: "+2%", ytm: 2 },
+  { label: "-1%", ytm: -1 },
+  { label: "-2%", ytm: -2 },
 ];
 
 // 计算目标买入价（纯前端，无需请求接口）
@@ -669,7 +732,7 @@ function calcTargetPrice(ytmPct) {
 // 统一更新结果展示
 function _updateTargetResult(ytmPct) {
   const resultEl = document.getElementById("targetPriceResult");
-  const gapEl    = document.getElementById("targetPriceGap");
+  const gapEl = document.getElementById("targetPriceGap");
   if (!resultEl) return;
   if (ytmPct === null || isNaN(ytmPct)) {
     resultEl.textContent = "—";
@@ -704,12 +767,12 @@ function onTargetYtmInput() {
 function renderTargetPriceCalc(d) {
   if (d["退市日期"]) return "";   // 已退市不显示
   const cashflows = d["cashflows"] || [];
-  const times     = d["times"]     || [];
+  const times = d["times"] || [];
   if (!cashflows.length) return "";  // 无未来现金流
 
   _targetCashflows = cashflows;
-  _targetTimes     = times;
-  _targetCurPrice  = parseFloat(d["债现价"] || 0);
+  _targetTimes = times;
+  _targetCurPrice = parseFloat(d["债现价"] || 0);
 
   const presetBtns = TARGET_PRESETS.map(p =>
     `<button class="target-preset-btn" onclick="onPresetClick(${p.ytm}, this)">${p.label}</button>`
@@ -742,11 +805,11 @@ function renderTargetPriceCalc(d) {
 
 async function loadNote(bondCode) {
   _noteBondCode = bondCode;
-  _noteLoaded   = false;
+  _noteLoaded = false;
   const textarea = document.getElementById('noteContent');
   textarea.value = '正在加载...';
   try {
-    const res  = await fetch(`/api/note?bond_code=${encodeURIComponent(bondCode)}`);
+    const res = await fetch(`/api/note?bond_code=${encodeURIComponent(bondCode)}`);
     const json = await res.json();
     if (json.success && json.data) {
       textarea.value = json.data.content || '';
@@ -761,13 +824,13 @@ async function loadNote(bondCode) {
 
 async function saveNote() {
   const bondCode = document.getElementById('bond_code').value.trim();
-  const content  = document.getElementById('noteContent').value;
+  const content = document.getElementById('noteContent').value;
   if (!bondCode) return;
   try {
     const res = await fetch('/api/note', {
       method: 'POST',
-      headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify({bond_code: bondCode, content: content}),
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ bond_code: bondCode, content: content }),
     });
     const json = await res.json();
     if (json.success) {
@@ -785,7 +848,7 @@ async function deleteNote() {
   if (!bondCode) return;
   if (!confirm('确定删除这条笔记？')) return;
   try {
-    const res = await fetch(`/api/note?bond_code=${encodeURIComponent(bondCode)}`, {method: 'DELETE'});
+    const res = await fetch(`/api/note?bond_code=${encodeURIComponent(bondCode)}`, { method: 'DELETE' });
     const json = await res.json();
     if (json.success) {
       document.getElementById('noteContent').value = '';
