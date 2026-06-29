@@ -39,15 +39,6 @@ function setFullHistory() {
   document.getElementById("end_date").value   = "";
 }
 
-// ── 初始化默认日期（近1年）────────────────────────────────
-(function initDates() {
-  const today      = new Date();
-  const oneYearAgo = new Date(today);
-  oneYearAgo.setFullYear(today.getFullYear() - 1);
-  document.getElementById("end_date").value   = fmtDate(today);
-  document.getElementById("start_date").value = fmtDate(oneYearAgo);
-})();
-
 // ── 查询入口 ─────────────────────────────────────────────
 async function queryData() {
   const bondCode  = document.getElementById("bond_code").value.trim();
@@ -140,34 +131,83 @@ window.addEventListener('popstate', () => {
   }
 });
 
+// 初始化日期
+function initDates() {
+  const today      = new Date();
+  const oneYearAgo = new Date(today);
+  oneYearAgo.setFullYear(today.getFullYear() - 1);
+  const endDateEl   = document.getElementById("end_date");
+  const startDateEl = document.getElementById("start_date");
+  if (endDateEl)   endDateEl.value   = fmtDate(today);
+  if (startDateEl) startDateEl.value = fmtDate(oneYearAgo);
+}
+
 // 页面加载时根据 hash 决定显示列表还是详情
-window.addEventListener("DOMContentLoaded", () => {
-  const hash = location.hash.replace('#', '');
-  if (hash && hash !== 'list') {
-    openDetail(hash);
-  } else {
-    showListView();
-    loadBondList();
+function initPage() {
+  console.log('[main.js] initPage 开始执行');
+  try {
+    // 初始化日期
+    console.log('[main.js] 开始执行 initDates');
+    initDates();
+    console.log('[main.js] initDates 执行完成');
+    
+    // 绑定债券代码输入框失焦事件
+    const bondCodeEl = document.getElementById("bond_code");
+    console.log('[main.js] 获取债券代码输入框元素:', bondCodeEl);
+    if (bondCodeEl) {
+      bondCodeEl.addEventListener("blur", function () {
+        console.log('[main.js] 债券代码输入框 blur 事件触发, 值:', this.value.trim());
+        const code = this.value.trim();
+        if (code && code !== lastLoadedBondCode) {
+          loadBondInfo(code);
+          _adjLoaded    = false;
+          _couponLoaded = false;
+          if (_activeTab === 'coupon') loadCouponInfo(code);
+          else if (_activeTab === 'adj') loadAdjLogs(code);
+        }
+      });
+    }
+    
+    // 回车触发查询
+    document.addEventListener("keydown", e => { 
+      console.log('[main.js] keydown 事件触发, 按键:', e.key);
+      if (e.key === "Enter") queryData(); 
+    });
+    
+    // 窗口缩放时重绘图表
+    window.addEventListener("resize", () => {
+      console.log('[main.js] 窗口 resize 事件触发');
+      mainChart   && mainChart.resize();
+      remainChart && remainChart.resize();
+    });
+    
+    // 根据hash决定显示列表还是详情
+    const hash = location.hash.replace('#', '');
+    console.log('[main.js] 当前 hash:', hash);
+    if (hash && hash !== 'list') {
+      console.log('[main.js] 打开详情页:', hash);
+      openDetail(hash);
+    } else {
+      console.log('[main.js] 显示列表页，开始加载债券列表');
+      showListView();
+      loadBondList();
+    }
+    console.log('[main.js] initPage 执行完成');
+  } catch (e) {
+    console.error('[main.js] initPage 执行出错:', e);
   }
-});
+}
 
-// 债券代码输入框失焦时，仅在代码变化时才刷新基础信息
-document.getElementById("bond_code").addEventListener("blur", function () {
-  const code = this.value.trim();
-  if (code && code !== lastLoadedBondCode) {
-    loadBondInfo(code);
-    _adjLoaded    = false;
-    _couponLoaded = false;
-    if (_activeTab === 'coupon') loadCouponInfo(code);
-    else if (_activeTab === 'adj') loadAdjLogs(code);
-  }
-});
-
-// 回车触发查询
-document.addEventListener("keydown", e => { if (e.key === "Enter") queryData(); });
-
-// 窗口缩放时重绘图表
-window.addEventListener("resize", () => {
-  mainChart   && mainChart.resize();
-  remainChart && remainChart.resize();
-});
+// 确保DOM加载完成后执行初始化
+console.log('[main.js] 检查 DOM 状态:', document.readyState);
+if (document.readyState === 'loading') {
+  console.log('[main.js] DOM 未就绪，监听 DOMContentLoaded 事件');
+  window.addEventListener("DOMContentLoaded", () => {
+    console.log('[main.js] DOMContentLoaded 事件触发，执行 initPage');
+    initPage();
+  });
+} else {
+  // DOM 已经加载完成，立即执行
+  console.log('[main.js] DOM 已就绪，立即执行 initPage');
+  initPage();
+}

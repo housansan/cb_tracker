@@ -246,6 +246,48 @@ def get_all_convertible_bonds() -> pd.DataFrame:
     return df
 
 
+def build_cashflows_from_coupon_info(coupon_info: dict) -> tuple:
+    """
+    从已解析的付息信息字典，构建以「今日」为基准的现金流和时间列表。
+    结构与 calc_ytm / calc_price_for_yield 期望的参数完全一致。
+
+    :param coupon_info: get_bond_info() 返回的 info["付息信息"]，需含：
+                        "付息日列表"（list[str] "YYYYMMDD"）
+                        "票息率列表"（list[float] %）
+                        "赎回价"（float 元，含最后一期利息）
+    :return: (cashflows, times) 两个等长列表；无未来现金流时返回 ([], [])
+    """
+    pay_date_strs = coupon_info.get("付息日列表", [])
+    rates         = coupon_info.get("票息率列表", [])
+    redeem_price  = coupon_info.get("赎回价", 100.0)
+
+    if not pay_date_strs or not rates:
+        return [], []
+
+    today    = datetime.today()
+    last_idx = len(pay_date_strs) - 1
+
+    cashflows, times = [], []
+    for i, d_str in enumerate(pay_date_strs):
+        try:
+            pay_dt = datetime.strptime(d_str, "%Y%m%d")
+        except ValueError:
+            continue
+        if pay_dt <= today:
+            continue
+        t = (pay_dt - today).days / 365.0
+        if t <= 0:
+            continue
+        if i == last_idx:
+            cashflows.append(float(redeem_price))
+        else:
+            coupon = 100.0 * rates[i] / 100.0  # 与 calc_ytm_series 第114行逻辑一致
+            cashflows.append(coupon)
+        times.append(t)
+
+    return cashflows, times
+
+
 def get_bond_info(bond_code: str) -> dict:
     """
     获取单只可转债的基础信息（名称、价格、正股代码、正股价格、转股溢价率等）
@@ -293,9 +335,12 @@ def get_bond_info(bond_code: str) -> dict:
                 value_date   = pd.to_datetime(info_r.get("VALUE_DATE"))
                 expire_date  = pd.to_datetime(info_r.get("EXPIRE_DATE") or info_r.get("CEASE_DATE"))
 
-                # 赎回价
+                # 赎回价 —— 优先从赎回条款取，再从利率说明取，最后回退到末期票息公式
+                # 匹配 "面值的108%" 或 "面值108%"（部分债券省略 "的"）
                 redeem_clause = str(info_r.get("REDEEM_CLAUSE", ""))
-                m = re.search(r'面值的(\d+(?:\.\d+)?)%', redeem_clause)
+                m = (re.search(r'面值[的]?(\d+(?:\.\d+)?)%', redeem_clause) or
+                     re.search(r'面值[的]?(\d+(?:\.\d+)?)%', rate_explain) or
+                     re.search(r'(\d+(?:\.\d+)?)元[（(]含最后', rate_explain))
                 redeem_ratio = float(m.group(1)) / 100 if m else (1 + (coupon_rates[-1] if coupon_rates else 0) / 100)
                 redeem_price = round(100 * redeem_ratio, 4)
 
@@ -321,6 +366,7 @@ def get_bond_info(bond_code: str) -> dict:
                     "起息日":     value_date.strftime("%Y%m%d") if not pd.isna(value_date) else "",
                     "到期日":     expire_date.strftime("%Y%m%d") if not pd.isna(expire_date) else "",
                     "赎回价":     redeem_price,
+                    "赎回条款":   redeem_clause,
                     "利率说明":   rate_explain,
                     "票息率列表": rates_used,
                     "付息日列表": [d.strftime("%Y%m%d") for d in pay_dates],
@@ -400,9 +446,12 @@ def fetch_bond_detail_only(bond_code: str) -> dict:
         value_date   = pd.to_datetime(info_r.get("VALUE_DATE"))
         expire_date  = pd.to_datetime(info_r.get("EXPIRE_DATE"))
 
-        # 赎回价
+        # 赎回价 —— 优先从赎回条款取，再从利率说明取，最后回退到末期票息公式
+        # 匹配 "面值的108%" 或 "面值108%"（部分债券省略 "的"）
         redeem_clause = str(info_r.get("REDEEM_CLAUSE", ""))
-        m = re.search(r'面值的(\d+(?:\.\d+)?)%', redeem_clause)
+        m = (re.search(r'面值[的]?(\d+(?:\.\d+)?)%', redeem_clause) or
+             re.search(r'面值[的]?(\d+(?:\.\d+)?)%', rate_explain) or
+             re.search(r'(\d+(?:\.\d+)?)元[（(]含最后', rate_explain))
         redeem_ratio = float(m.group(1)) / 100 if m else (1 + (coupon_rates[-1] if coupon_rates else 0) / 100)
         redeem_price = round(100 * redeem_ratio, 4)
 
@@ -428,6 +477,7 @@ def fetch_bond_detail_only(bond_code: str) -> dict:
             "起息日":     value_date.strftime("%Y%m%d") if not pd.isna(value_date) else "",
             "到期日":     expire_date.strftime("%Y%m%d") if not pd.isna(expire_date) else "",
             "赎回价":     redeem_price,
+            "赎回条款":   redeem_clause,
             "利率说明":   rate_explain,
             "票息率列表": rates_used,
             "付息日列表": [d.strftime("%Y%m%d") for d in pay_dates],

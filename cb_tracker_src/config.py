@@ -113,6 +113,11 @@ DB_CONFIG = {
     "dir": _resolve_path(_get("db", "dir"), _DEFAULTS["db"]["dir"]),
 }
 
+# ── 用户数据库配置（持仓 / 预警 / 笔记）────────────────────
+USER_DB_CONFIG = {
+    "dir": _resolve_path(_get("user_db", "dir"), "../user_data"),
+}
+
 # ── 可转债业务配置 ─────────────────────────────────────────
 BOND_CONFIG = {
     # 后台补全线程每次请求之间的间隔时间（秒）

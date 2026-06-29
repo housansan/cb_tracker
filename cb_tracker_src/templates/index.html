@@ -25,86 +25,294 @@
       <!-- 第一行：标题 + 搜索框 + 计数 -->
       <div class="list-toolbar-row list-toolbar-row-search">
         <h2>📋 全市场可转债</h2>
-        <input class="list-search" type="text" id="listSearch" placeholder="搜索代码/名称/正股..." oninput="filterList()" />
+        <div class="search-box">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#9e9e9e" stroke-width="2">
+            <circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/>
+          </svg>
+          <input class="list-search" type="text" id="listSearch" placeholder="搜索代码/名称/正股..." oninput="filterList()" />
+        </div>
         <span class="list-count" id="listCount"></span>
+        <button class="filter-toggle-btn" onclick="openPositionModal()">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z"/></svg>
+          持仓
+        </button>
+        <button class="filter-toggle-btn" onclick="openAlertModal()">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
+          预警
+        </button>
+        <button class="filter-toggle-btn active" onclick="toggleFilterPanel()">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <polygon points="22 3 2 3 10 12.46 10 19 14 21 14 12.46 22 3"/>
+          </svg>
+          筛选条件
+          <span class="filter-count" id="filterCount">0</span>
+        </button>
       </div>
-      <!-- 第二行：筛选条件 -->
-      <div class="list-toolbar-row list-toolbar-row-filter">
-        <!-- 信用评级多选下拉 -->
-        <div class="filter-item">
-          <span class="filter-item-label">信用评级</span>
-          <div class="rating-filter" id="ratingFilter">
-            <div class="rating-filter-trigger" id="ratingTrigger" onclick="toggleRatingDropdown()">
-              <span id="ratingTriggerText">全部</span>
-              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="6 9 12 15 18 9"/></svg>
-            </div>
-            <div class="rating-dropdown" id="ratingDropdown">
-              <div class="rating-dropdown-header">
-                <span>信用评级</span>
-                <button onclick="clearRatingFilter()">清除</button>
+
+      <!-- 可折叠的筛选面板 -->
+      <div class="filter-panel open" id="filterPanel">
+        <!-- 1. 可转债范围 -->
+        <div class="filter-section">
+          <div class="filter-section-title">可转债范围</div>
+          <div class="filter-section-content">
+            <!-- 上市状态 -->
+            <div class="filter-group">
+              <label class="filter-label">上市状态</label>
+              <div class="delist-radio-group">
+                <label class="delist-radio-label">
+                  <input type="radio" name="delistFilter" value="active" checked onchange="onDelistFilterChange(this)" />
+                  <span>在市</span>
+                </label>
+                <label class="delist-radio-label">
+                  <input type="radio" name="delistFilter" value="pending" onchange="onDelistFilterChange(this)" />
+                  <span>待上市</span>
+                </label>
+                <label class="delist-radio-label">
+                  <input type="radio" name="delistFilter" value="delisted" onchange="onDelistFilterChange(this)" />
+                  <span>已退市</span>
+                </label>
+                <label class="delist-radio-label">
+                  <input type="radio" name="delistFilter" value="all" onchange="onDelistFilterChange(this)" />
+                  <span>全部</span>
+                </label>
               </div>
-              <div class="rating-options" id="ratingOptions"><!-- 动态生成 --></div>
+            </div>
+
+            <!-- 市场 -->
+            <div class="filter-group">
+              <label class="filter-label">市场</label>
+              <div class="delist-radio-group" id="marketFilterGroup">
+                <label class="delist-radio-label">
+                  <input type="radio" name="marketFilter" value="all" checked onchange="filterList()" />
+                  <span>全部</span>
+                </label>
+                <label class="delist-radio-label">
+                  <input type="radio" name="marketFilter" value="sh" onchange="filterList()" />
+                  <span>沪</span>
+                </label>
+                <label class="delist-radio-label">
+                  <input type="radio" name="marketFilter" value="sz" onchange="filterList()" />
+                  <span>深</span>
+                </label>
+                <label class="delist-radio-label">
+                  <input type="radio" name="marketFilter" value="kcb" onchange="filterList()" />
+                  <span>科创</span>
+                </label>
+                <label class="delist-radio-label">
+                  <input type="radio" name="marketFilter" value="cyb" onchange="filterList()" />
+                  <span>创业</span>
+                </label>
+              </div>
+            </div>
+
+            <!-- 信用评级 -->
+            <div class="filter-group">
+              <label class="filter-label">评级</label>
+              <div class="rating-filter" id="ratingFilter">
+                <div class="rating-filter-trigger" id="ratingTrigger" onclick="toggleRatingDropdown()">
+                  <span id="ratingTriggerText">全部</span>
+                  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="6 9 12 15 18 9"/></svg>
+                </div>
+                <div class="rating-dropdown" id="ratingDropdown">
+                  <div class="rating-dropdown-header">
+                    <span>信用评级</span>
+                    <button onclick="clearRatingFilter()">清除</button>
+                  </div>
+                  <div class="rating-options" id="ratingOptions"><!-- 动态生成 --></div>
+                </div>
+              </div>
+            </div>
+
+            <!-- 上市时间 -->
+            <div class="filter-group">
+              <label class="filter-label">上市时间</label>
+              <div class="price-range-filter">
+                <input class="price-range-input date-input" type="date" id="listingDateMin" onchange="filterList()" />
+                <span class="price-range-sep">~</span>
+                <input class="price-range-input date-input" type="date" id="listingDateMax" onchange="filterList()" />
+              </div>
+            </div>
+
+            <!-- 剩余年限 -->
+            <div class="filter-group">
+              <label class="filter-label">剩余年限(年)</label>
+              <div class="price-range-filter">
+                <input class="price-range-input" type="number" id="remainYearsMin" placeholder="最短" min="0" step="0.1" oninput="filterList()" />
+                <span class="price-range-sep">~</span>
+                <input class="price-range-input" type="number" id="remainYearsMax" placeholder="最长" min="0" step="0.1" oninput="filterList()" />
+              </div>
             </div>
           </div>
         </div>
-        <!-- 债现价区间筛选 -->
-        <div class="filter-item">
-          <span class="filter-item-label">债现价</span>
-          <div class="price-range-filter">
-            <input class="price-range-input" type="number" id="priceMin" placeholder="最低价" min="0" step="0.001" oninput="filterList()" />
-            <span class="price-range-sep">~</span>
-            <input class="price-range-input" type="number" id="priceMax" placeholder="最高价" min="0" step="0.001" oninput="filterList()" />
+
+        <!-- 2. 可转债条件 -->
+        <div class="filter-section">
+          <div class="filter-section-title">可转债条件</div>
+          <div class="filter-section-content">
+            <!-- 转债价格 -->
+            <div class="filter-group">
+              <label class="filter-label">转债价格</label>
+              <div class="price-range-filter">
+                <input class="price-range-input" type="number" id="priceMin" placeholder="最低" min="0" step="0.001" oninput="filterList()" />
+                <span class="price-range-sep">~</span>
+                <input class="price-range-input" type="number" id="priceMax" placeholder="最高" min="0" step="0.001" oninput="filterList()" />
+              </div>
+            </div>
+
+            <!-- 转股溢价率 -->
+            <div class="filter-group">
+              <label class="filter-label">转股溢价率(%)</label>
+              <div class="price-range-filter">
+                <input class="price-range-input" type="number" id="premiumMin" placeholder="最低" step="0.01" oninput="filterList()" />
+                <span class="price-range-sep">~</span>
+                <input class="price-range-input" type="number" id="premiumMax" placeholder="最高" step="0.01" oninput="filterList()" />
+              </div>
+            </div>
+
+            <!-- 剩余规模 -->
+            <div class="filter-group">
+              <label class="filter-label">剩余规模(亿)</label>
+              <div class="price-range-filter">
+                <input class="price-range-input" type="number" id="remainScaleMin" placeholder="最低" min="0" step="0.1" oninput="filterList()" />
+                <span class="price-range-sep">~</span>
+                <input class="price-range-input" type="number" id="remainScaleMax" placeholder="最高" min="0" step="0.1" oninput="filterList()" />
+              </div>
+            </div>
+
+            <!-- 转股价值 -->
+            <div class="filter-group">
+              <label class="filter-label">转股价值</label>
+              <div class="price-range-filter">
+                <input class="price-range-input" type="number" id="convertValueMin" placeholder="最低" step="0.01" oninput="filterList()" />
+                <span class="price-range-sep">~</span>
+                <input class="price-range-input" type="number" id="convertValueMax" placeholder="最高" step="0.01" oninput="filterList()" />
+              </div>
+            </div>
+
+            <!-- 到期收益率 -->
+            <div class="filter-group">
+              <label class="filter-label">到期收益率(%)</label>
+              <div class="price-range-filter">
+                <input class="price-range-input" type="number" id="ytmMin" placeholder="最低" step="0.01" oninput="filterList()" />
+                <span class="price-range-sep">~</span>
+                <input class="price-range-input" type="number" id="ytmMax" placeholder="最高" step="0.01" oninput="filterList()" />
+              </div>
+            </div>
+
+            <!-- 双低值 -->
+            <div class="filter-group">
+              <label class="filter-label">双低值(价格+溢价率)</label>
+              <div class="price-range-filter">
+                <input class="price-range-input" type="number" id="doubleLowMin" placeholder="最低" step="0.1" oninput="filterList()" />
+                <span class="price-range-sep">~</span>
+                <input class="price-range-input" type="number" id="doubleLowMax" placeholder="最高" step="0.1" oninput="filterList()" />
+              </div>
+            </div>
+
+            <!-- 发行规模 -->
+            <div class="filter-group">
+              <label class="filter-label">发行规模(亿)</label>
+              <div class="price-range-filter">
+                <input class="price-range-input" type="number" id="issueScaleMin" placeholder="最低" min="0" step="0.1" oninput="filterList()" />
+                <span class="price-range-sep">~</span>
+                <input class="price-range-input" type="number" id="issueScaleMax" placeholder="最高" min="0" step="0.1" oninput="filterList()" />
+              </div>
+            </div>
           </div>
         </div>
-        <!-- 转股溢价率区间筛选 -->
-        <div class="filter-item">
-          <span class="filter-item-label">转股溢价率</span>
-          <div class="price-range-filter">
-            <input class="price-range-input" type="number" id="premiumMin" placeholder="最低%" step="0.01" oninput="filterList()" />
-            <span class="price-range-sep">~</span>
-            <input class="price-range-input" type="number" id="premiumMax" placeholder="最高%" step="0.01" oninput="filterList()" />
+
+        <!-- 3. 特殊状态 -->
+        <div class="filter-section">
+          <div class="filter-section-title">特殊状态</div>
+          <div class="filter-section-content">
+            <div class="filter-group">
+              <label class="filter-label">特殊状态</label>
+              <div class="status-checkbox-group">
+                <label class="filter-checkbox-label">
+                  <input type="checkbox" id="filterStrongRedeem" onchange="filterList()" />
+                  <span>强赎中</span>
+                </label>
+                <label class="filter-checkbox-label">
+                  <input type="checkbox" id="filterNearStrongRedeem" onchange="filterList()" />
+                  <span>临近强赎</span>
+                </label>
+                <label class="filter-checkbox-label">
+                  <input type="checkbox" id="filterPutback" onchange="filterList()" />
+                  <span>回售中</span>
+                </label>
+                <label class="filter-checkbox-label">
+                  <input type="checkbox" id="filterNearPutback" onchange="filterList()" />
+                  <span>临近回售</span>
+                </label>
+              </div>
+            </div>
           </div>
         </div>
-        <!-- 在市/退市 单选 -->
-        <div class="filter-item">
-          <span class="filter-item-label">状态</span>
-          <div class="delist-radio-group">
-            <label class="delist-radio-label">
-              <input type="radio" name="delistFilter" value="active" checked onchange="onDelistFilterChange(this)" />
-              <span>在市</span>
-            </label>
-            <label class="delist-radio-label">
-              <input type="radio" name="delistFilter" value="pending" onchange="onDelistFilterChange(this)" />
-              <span>待上市</span>
-            </label>
-            <label class="delist-radio-label">
-              <input type="radio" name="delistFilter" value="delisted" onchange="onDelistFilterChange(this)" />
-              <span>已退市</span>
-            </label>
-            <label class="delist-radio-label">
-              <input type="radio" name="delistFilter" value="all" onchange="onDelistFilterChange(this)" />
-              <span>全部</span>
-            </label>
+
+        <!-- 4. 地区黑名单 -->
+        <div class="filter-section">
+          <div class="filter-section-title">地区黑名单</div>
+          <div class="filter-section-content">
+            <div class="filter-group" style="min-width:280px">
+              <label class="filter-label">排除地区（多个用空格分隔）</label>
+              <input class="price-range-input" type="text" id="regionBlacklist" placeholder="如：广东 北京 上海" style="width:100%" oninput="filterList()" />
+            </div>
           </div>
         </div>
-        <!-- 冻结列选择 -->
-        <div class="filter-item">
-          <span class="filter-item-label">冻结列</span>
-          <div class="freeze-col-filter">
-            <label class="freeze-col-label">
-              <input type="radio" name="freezeCol" value="0" onchange="onFreezeColChange(this)" />
-              <span>不冻结</span>
-            </label>
-            <label class="freeze-col-label">
-              <input type="radio" name="freezeCol" value="1" onchange="onFreezeColChange(this)" />
-              <span>冻结代码</span>
-            </label>
-            <label class="freeze-col-label">
-              <input type="radio" name="freezeCol" value="2" checked onchange="onFreezeColChange(this)" />
-              <span>冻结代码+名称</span>
-            </label>
+
+        <!-- 5. 正股条件 -->
+        <div class="filter-section">
+          <div class="filter-section-title">正股条件</div>
+          <div class="filter-section-content">
+            <!-- 正股价 -->
+            <div class="filter-group">
+              <label class="filter-label">正股价</label>
+              <div class="price-range-filter">
+                <input class="price-range-input" type="number" id="stockPriceMin" placeholder="最低" min="0" step="0.01" oninput="filterList()" />
+                <span class="price-range-sep">~</span>
+                <input class="price-range-input" type="number" id="stockPriceMax" placeholder="最高" min="0" step="0.01" oninput="filterList()" />
+              </div>
+            </div>
+
+            <!-- 正股PB -->
+            <div class="filter-group">
+              <label class="filter-label">正股PB</label>
+              <div class="price-range-filter">
+                <input class="price-range-input" type="number" id="stockPbMin" placeholder="最低" step="0.01" oninput="filterList()" />
+                <span class="price-range-sep">~</span>
+                <input class="price-range-input" type="number" id="stockPbMax" placeholder="最高" step="0.01" oninput="filterList()" />
+              </div>
+            </div>
+
+            <!-- 正股市值 -->
+            <div class="filter-group">
+              <label class="filter-label">正股市值(亿)</label>
+              <div class="price-range-filter">
+                <input class="price-range-input" type="number" id="stockMarketCapMin" placeholder="最低" step="0.01" oninput="filterList()" />
+                <span class="price-range-sep">~</span>
+                <input class="price-range-input" type="number" id="stockMarketCapMax" placeholder="最高" step="0.01" oninput="filterList()" />
+              </div>
+            </div>
           </div>
         </div>
+      </div>
+
+      <!-- 快捷策略 + 重置 -->
+      <div class="list-toolbar-row list-toolbar-row-quick">
+        <span class="filter-item-label" style="white-space:nowrap">快捷策略</span>
+        <button class="quick-filter-btn" onclick="setQuickFilter('sub100')">破面 &lt;100</button>
+        <button class="quick-filter-btn" onclick="setQuickFilter('low_price')">低价 100~110</button>
+        <button class="quick-filter-btn" onclick="setQuickFilter('low_premium')">低溢价 &lt;20%</button>
+        <button class="quick-filter-btn" onclick="setQuickFilter('double_low')">双低策略</button>
+        <button class="quick-filter-btn" onclick="setQuickFilter('expire_soon')">到期≤2年</button>
+        <button class="quick-filter-btn" onclick="setQuickFilter('small_scale')">小盘 &lt;3亿</button>
+        <button class="quick-filter-btn" onclick="setQuickFilter('large_scale')">大盘 ≥10亿</button>
+        <button class="quick-filter-btn reset-btn" onclick="resetFilters()">↺ 重置筛选</button>
+      </div>
+
+      <!-- 固定列提示 -->
+      <div class="filter-hint">
+        <span>💡 点击列标题的 📌 可固定/取消固定列</span>
       </div>
     </div>
     <div id="listContent"><div class="list-loading">正在加载可转债列表...</div></div>
@@ -147,6 +355,27 @@
             </svg>
             转股价调整记录
           </button>
+          <button class="detail-tab-btn" id="tabBtnStock" onclick="switchDetailTab('stock')">
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <line x1="18" y1="20" x2="18" y2="10"/><line x1="12" y1="20" x2="12" y2="4"/>
+              <line x1="6" y1="20" x2="6" y2="14"/>
+            </svg>
+            正股财务
+          </button>
+          <button class="detail-tab-btn" id="tabBtnNews" onclick="switchDetailTab('news')">
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <path d="M4 22h16a2 2 0 0 0 2-2V4a2 2 0 0 0-2-2H8a2 2 0 0 0-2 2v16a2 2 0 0 1-2 2Zm0 0a2 2 0 0 1-2-2v-9c0-1.1.9-2 2-2h2"/>
+              <path d="M18 14h-8"/><path d="M15 18h-5"/><path d="M10 6h8v4h-8z"/>
+            </svg>
+            公告/热点
+          </button>
+          <button class="detail-tab-btn" id="tabBtnNote" onclick="switchDetailTab('note')">
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/>
+              <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/>
+            </svg>
+            笔记
+          </button>
         </div>
         <div class="detail-tab-panel" id="panelCoupon">
           <div class="coupon-loading" id="couponLoading">点击「付息信息」标签加载...</div>
@@ -155,6 +384,23 @@
         <div class="detail-tab-panel" id="panelAdj">
           <div class="adj-loading" id="adjLoading">点击「转股价调整记录」标签加载...</div>
           <div id="adjBody"></div>
+        </div>
+        <div class="detail-tab-panel" id="panelStock">
+          <div class="sf-loading" id="sfLoading">点击「正股财务」标签加载...</div>
+          <div id="sfBody"></div>
+        </div>
+        <div class="detail-tab-panel" id="panelNews">
+          <div class="news-loading" id="newsLoading">点击「公告/热点」标签加载...</div>
+          <div id="newsBody"></div>
+        </div>
+        <div class="detail-tab-panel" id="panelNote">
+          <div style="padding:16px">
+            <textarea id="noteContent" rows="8" style="width:100%;padding:10px;border:1px solid #e0e0e0;border-radius:8px;font-size:.85rem;resize:vertical" placeholder="记录这只可转债的交易思路、目标价位、止损位..."></textarea>
+            <div style="margin-top:10px;display:flex;gap:8px;justify-content:flex-end">
+              <button class="quick-filter-btn reset-btn" onclick="deleteNote()">删除</button>
+              <button class="quick-filter-btn" onclick="saveNote()" style="background:#3949ab;color:#fff;border-color:#3949ab">保存笔记</button>
+            </div>
+          </div>
         </div>
       </div>
     </div>
@@ -248,5 +494,69 @@
 <script src="/static/js/bond-chart.js"></script>
 <script src="/static/js/bond-table.js"></script>
 <script src="/static/js/main.js"></script>
+  <!-- 持仓管理弹窗 -->
+  <div class="modal-overlay" id="positionModal" style="display:none">
+    <div class="modal-content" style="max-width:520px">
+      <div class="modal-header">
+        <h3>我的持仓</h3>
+        <button class="modal-close" onclick="closePositionModal()">&times;</button>
+      </div>
+      <div style="max-height:320px;overflow:auto;margin-bottom:12px">
+        <table class="bond-list-table" style="font-size:.8rem">
+          <thead><tr><th>债券</th><th class="num">成本</th><th class="num">数量</th><th class="num">盈亏</th><th></th></tr></thead>
+          <tbody id="positionModalBody"></tbody>
+        </table>
+      </div>
+      <div style="border-top:1px solid #eee;padding-top:12px">
+        <div style="display:flex;gap:8px;margin-bottom:8px">
+          <input class="price-range-input" type="text" id="posBondCode" placeholder="债券代码" style="width:90px" />
+          <input class="price-range-input" type="text" id="posBondName" placeholder="债券名称" style="width:100px" />
+          <input class="price-range-input" type="number" id="posCostPrice" placeholder="成本价" step="0.001" style="width:80px" />
+          <input class="price-range-input" type="number" id="posQuantity" placeholder="张数" step="1" style="width:70px" />
+        </div>
+        <div style="display:flex;justify-content:flex-end;gap:8px">
+          <button class="quick-filter-btn reset-btn" onclick="closePositionModal()">关闭</button>
+          <button class="quick-filter-btn" onclick="addPosition()" style="background:#3949ab;color:#fff;border-color:#3949ab">添加持仓</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- 预警设置弹窗 -->
+  <div class="modal-overlay" id="alertModal" style="display:none">
+    <div class="modal-content" style="max-width:560px">
+      <div class="modal-header">
+        <h3>价格预警</h3>
+        <button class="modal-close" onclick="closeAlertModal()">&times;</button>
+      </div>
+      <div style="max-height:300px;overflow:auto;margin-bottom:12px">
+        <table class="bond-list-table" style="font-size:.8rem">
+          <thead><tr><th>债券</th><th>条件</th><th>阈值</th><th>状态</th><th></th></tr></thead>
+          <tbody id="alertModalBody"></tbody>
+        </table>
+      </div>
+      <div style="border-top:1px solid #eee;padding-top:12px">
+        <div style="display:flex;gap:8px;margin-bottom:8px;flex-wrap:wrap">
+          <input class="price-range-input" type="text" id="alertBondCode" placeholder="债券代码" style="width:90px" />
+          <select class="price-range-input" id="alertType" style="width:110px">
+            <option value="price">转债价格</option>
+            <option value="premium">溢价率</option>
+            <option value="ytm">到期收益率</option>
+            <option value="double_low">双低值</option>
+          </select>
+          <select class="price-range-input" id="alertOperator" style="width:80px">
+            <option value="lt">小于</option>
+            <option value="gt">大于</option>
+          </select>
+          <input class="price-range-input" type="number" id="alertThreshold" placeholder="阈值" step="0.01" style="width:90px" />
+        </div>
+        <div style="display:flex;justify-content:flex-end;gap:8px">
+          <button class="quick-filter-btn reset-btn" onclick="closeAlertModal()">关闭</button>
+          <button class="quick-filter-btn" onclick="addAlert()" style="background:#3949ab;color:#fff;border-color:#3949ab">添加预警</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
 </body>
 </html>
