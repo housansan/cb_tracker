@@ -297,10 +297,19 @@ def upsert_bond(data: dict) -> None:
     placeholders = ", ".join(f":{f}" for f in _INSERT_FIELDS)
     # 名称字段：只在新值非空字符串时才覆盖，避免空值清空已有名称
     _NAME_FIELDS = {"bond_name", "stock_name"}
+    # 详细字段 + 规模字段：单只补全（fetch_bond_detail_only）常不带这些值，
+    # 用 COALESCE 在新值为 NULL 时保留旧值，避免把列表接口写好的数据冲成 NULL。
+    _COALESCE_FIELDS = {
+        "listing_date", "delist_date", "value_date", "expire_date",
+        "redeem_clause", "coupon_rate_desc", "coupon_rates", "coupon_pay_dates",
+        "issue_size", "issue_size_original", "credit_rating",
+    }
     update_parts = []
     for f in _UPSERT_FIELDS:
         if f in _NAME_FIELDS:
             update_parts.append(f"{f}=CASE WHEN excluded.{f} != '' THEN excluded.{f} ELSE {f} END")
+        elif f in _COALESCE_FIELDS:
+            update_parts.append(f"{f}=COALESCE(excluded.{f}, {f})")
         else:
             update_parts.append(f"{f}=excluded.{f}")
     update_clause = ", ".join(update_parts)

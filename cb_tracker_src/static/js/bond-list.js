@@ -531,10 +531,10 @@ function renderBondList(bonds) {
     if (hasStockPrice) thead += `<th class="num sortable" onclick="sortList('正股价')">正股价${_sortIcon('正股价')}</th>`;
     if (hasConvertValue) thead += `<th class="num sortable" onclick="sortList('转股价值')">转股价值${_sortIcon('转股价值')}</th>`;
     if (hasPremium) thead += `<th class="num sortable" onclick="sortList('转股溢价率')">转股溢价率${_sortIcon('转股溢价率')}</th>`;
+    if (hasYTM) thead += `<th class="num sortable" onclick="sortList('到期收益率')">到期收益率${_sortIcon('到期收益率')}</th>`;
     if (hasDoubleLow) thead += `<th class="num sortable" onclick="sortList('双低值')">双低值${_sortIcon('双低值')}</th>`;
     if (hasRedeemProgress) thead += `<th class="num sortable" onclick="sortList('距离强赎线')">强赎进度${_sortIcon('距离强赎线')}</th>`;
     if (hasXiuzheng) thead += `<th class="center sortable" onclick="sortList('下修博弈')">下修博弈${_sortIcon('下修博弈')}</th>`;
-    if (hasYTM) thead += `<th class="num sortable" onclick="sortList('到期收益率')">到期收益率${_sortIcon('到期收益率')}</th>`;
     if (hasRating) thead += `<th class="center sortable" onclick="sortList('信用评级')">信用评级${_sortIcon('信用评级')}</th>`;
     if (hasRemain) thead += `<th class="num sortable" onclick="sortList('剩余规模')">剩余规模(亿)${_sortIcon('剩余规模')}</th>`;
     if (hasIssueSize) thead += `<th class="num sortable" onclick="sortList('发行规模')">发行规模(亿)${_sortIcon('发行规模')}</th>`;
@@ -605,6 +605,10 @@ function renderBondList(bonds) {
           row += '<td class="num">-</td>';
         }
       }
+      if (hasYTM) {
+        const ytm = b['到期收益率'] != null ? parseFloat(b['到期收益率']).toFixed(2) + '%' : '-';
+        row += `<td class="num">${ytm}</td>`;
+      }
       if (hasDoubleLow) {
         const dl = b['双低值'] != null ? parseFloat(b['双低值']).toFixed(2) : '-';
         row += `<td class="num">${dl}</td>`;
@@ -624,10 +628,6 @@ function renderBondList(bonds) {
       if (hasXiuzheng) {
         const xz = b['下修博弈'];
         row += `<td class="center">${xz ? '<span class="pos">是</span>' : '-'}</td>`;
-      }
-      if (hasYTM) {
-        const ytm = b['到期收益率'] != null ? parseFloat(b['到期收益率']).toFixed(2) : '-';
-        row += `<td class="num">${ytm}</td>`;
       }
       if (hasRating) {
         const r = _pureRating(b['信用评级']) || '-';
