@@ -519,6 +519,8 @@ def fetch_bond_detail_only(bond_code: str) -> dict:
                 return default
 
         conv_price = _safe_float(info_r.get("TRANSFER_PRICE") or info_r.get("CONVERT_PRICE"))
+        # 发行规模（亿元）：bond_zh_cov_info 提供 ACTUAL_ISSUE_SCALE
+        issue_scale = _safe_float(info_r.get("ACTUAL_ISSUE_SCALE") or info_r.get("ISSUE_SCALE"), default=None)
 
         return {
             "债券代码":   bond_code_str or pure,
@@ -532,6 +534,7 @@ def fetch_bond_detail_only(bond_code: str) -> dict:
             "转股价值":   None,
             "信用评级":   str(info_r.get("RATING") or info_r.get("CREDIT_RATING") or ""),
             "剩余规模":   None,
+            "发行规模":   issue_scale,
             "剩余年限":   remaining_years,
             "上市日期":   listing_date,
             "退市日期":   delist_date,

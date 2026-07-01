@@ -6,6 +6,8 @@ from bond.db import update_bond_region, query_positions, upsert_position, delete
 from bond.cache import read_local_cache
 from bond.fetch import fetch_all_cb_remaining
 from bond.history import build_cashflows_from_coupon_info
+from bond.calc import calc_ytm
+from bond.db import _parse_redeem_price
 from config import LOG_CONFIG, EXPORT_CONFIG, DB_CONFIG, USER_DB_CONFIG, BOND_CONFIG, NETWORK_CONFIG
 from datetime import datetime, timedelta
 from logging.handlers import TimedRotatingFileHandler
@@ -250,6 +252,39 @@ _price_cache = {
 _PRICE_CACHE_TTL = 3600  # 1 小时
 
 
+def _fetch_spot_prices(codes: set) -> dict:
+    """
+    用新浪实时快照 bond_zh_hs_cov_spot() 为指定债补价（单次全市场请求，无封 IP 风险）。
+    对停牌债 trade(现价)为 0，回退用 settlement(前结算/昨收)。
+
+    :param codes: 待补价的纯数字代码集合
+    :return: {code: price}，仅含成功补到正价的债；接口失败返回空 dict
+    """
+    if not codes:
+        return {}
+    try:
+        spot_df = ak.bond_zh_hs_cov_spot()
+        if spot_df.empty:
+            return {}
+        # symbol 形如 'sz123092'，去掉 2 位交易所前缀
+        spot_df = spot_df.copy()
+        spot_df["_code"] = spot_df["symbol"].astype(str).str[2:]
+        result = {}
+        for _, r in spot_df[spot_df["_code"].isin(codes)].iterrows():
+            try:
+                trade = float(r.get("trade") or 0)
+                settle = float(r.get("settlement") or 0)
+                px = trade if trade > 0 else settle
+                if px and px > 0:
+                    result[r["_code"]] = round(px, 4)
+            except (TypeError, ValueError):
+                continue
+        return result
+    except Exception as _e:
+        logger.warning("[spot_prices] 兜底实时快照拉取失败 err=%s", _e)
+        return {}
+
+
 def _get_price_map() -> dict:
     """获取全市场实时价格 map，优先读缓存（1小时内有效）"""
     now = datetime.now()
@@ -266,17 +301,38 @@ def _get_price_map() -> dict:
             return v
 
         price_map = {}
+        suspect_codes = []  # 债现价被 fillna(100) 占位、需兜底补价的债
         for _, row in df.iterrows():
             code = str(row.get("债券代码", "")).strip()
             if code:
+                bond_price = _clean(row.get("债现价"))
+                stock_price = _clean(row.get("正股价"))
+                premium = _clean(row.get("转股溢价率"))
+                # akshare bond_zh_cov() 对无实时行情的债现价会 fillna(100)，
+                # 表现为「债现价==100 且 正股价缺失」。此为占位假值（非真实市价），
+                # 先置 None，再用新浪快照兜底补真实价（仍补不到则显示 '-'）。
+                if bond_price == 100.0 and stock_price is None:
+                    bond_price = None
+                    suspect_codes.append(code)
                 price_map[code] = {
-                    "债现价":     _clean(row.get("债现价")),
-                    "正股价":     _clean(row.get("正股价")),
-                    "转股溢价率": _clean(row.get("转股溢价率")),
+                    "债现价":     bond_price,
+                    "正股价":     stock_price,
+                    "转股溢价率": premium,
                 }
+
+        # 对占位债用新浪实时快照兜底补价（单次全市场请求）
+        filled_cnt = 0
+        if suspect_codes:
+            spot_prices = _fetch_spot_prices(set(suspect_codes))
+            for code, px in spot_prices.items():
+                if code in price_map:
+                    price_map[code]["债现价"] = px
+                    filled_cnt += 1
+
         _price_cache["data"] = price_map
         _price_cache["expire_at"] = now + timedelta(seconds=_PRICE_CACHE_TTL)
-        logger.info("[price_map] 实时价格缓存已更新，共 %d 只", len(price_map))
+        logger.info("[price_map] 实时价格缓存已更新，共 %d 只（%d 只无行情占位，其中 %d 只快照兜底补价成功）",
+                    len(price_map), len(suspect_codes), filled_cnt)
         return price_map
     except Exception as _e:
         logger.warning("[price_map] 获取实时价格失败 err=%s", _e)
@@ -301,6 +357,45 @@ def _attach_cashflows(info: dict) -> None:
         logger.warning("[bond_info] 现金流构建失败 err=%s", _e)
         info["cashflows"] = []
         info["times"] = []
+
+
+def _calc_pretax_ytm(bond_price, coupon_pay_dates: list, coupon_rates: list,
+                     redeem_clause: str = "", rate_desc: str = "") -> float | None:
+    """
+    计算到期税前收益率（YTM，年化 %）。
+
+    使用全额票息和含税赎回价（不扣 20% 利息税），因此结果为「税前」口径。
+    复用 build_cashflows_from_coupon_info + calc_ytm，与详情页保持一致。
+
+    :param bond_price:       债现价（元）
+    :param coupon_pay_dates: 付息日列表 list[str] "YYYYMMDD"
+    :param coupon_rates:     各年票息率 list[float]（%）
+    :param redeem_clause:    赎回条款原文（用于解析到期赎回价）
+    :param rate_desc:        利率说明原文（赎回价兜底来源）
+    :return: YTM（%），无法计算时返回 None
+    """
+    try:
+        if bond_price is None or not coupon_pay_dates or not coupon_rates:
+            return None
+        price = float(bond_price)
+        if price <= 0 or math.isnan(price) or math.isinf(price):
+            return None
+        redeem_price = _parse_redeem_price(redeem_clause or "", rate_desc or "", coupon_rates)
+        coupon_info = {
+            "付息日列表": coupon_pay_dates,
+            "票息率列表": coupon_rates,
+            "赎回价":     redeem_price,
+        }
+        cashflows, times = build_cashflows_from_coupon_info(coupon_info)
+        if not cashflows:
+            return None
+        ytm = calc_ytm(price, cashflows, times)
+        if ytm is None or (isinstance(ytm, float) and (math.isnan(ytm) or math.isinf(ytm))):
+            return None
+        return round(ytm, 4)
+    except Exception as _e:
+        logger.warning("[_calc_pretax_ytm] 计算失败 err=%s", _e)
+        return None
 
 
 @app.route("/")
@@ -543,6 +638,21 @@ def api_bond_list():
                                 pay_dates = json.loads(r["coupon_pay_dates"])
                             except Exception:
                                 pass
+                        # 票息率列表
+                        coupon_rates = []
+                        if r.get("coupon_rates"):
+                            try:
+                                coupon_rates = json.loads(r["coupon_rates"])
+                            except Exception:
+                                pass
+                        # 到期税前收益率（YTM，%）：用债现价 + 付息结构实时计算
+                        ytm = _calc_pretax_ytm(
+                            prices.get("债现价"),
+                            pay_dates,
+                            coupon_rates,
+                            r.get("redeem_clause") or "",
+                            r.get("coupon_rate_desc") or "",
+                        )
                         # 计算双低值 = 债现价 + 转股溢价率（%）
                         bond_price = prices.get("债现价")
                         premium_rate = prices.get("转股溢价率")
@@ -595,6 +705,7 @@ def api_bond_list():
                             "转股价值":   convert_value,
                             "双低值":     double_low,
                             "距离强赎线": redeem_progress,
+                            "到期收益率": ytm,
                             "下修博弈":   xiuzheng,
                             "信用评级":   decode_credit_rating(r["credit_rating"]),
                             "剩余规模":   round(r["issue_size"] / 100, 2) if r["issue_size"] else None,
@@ -639,13 +750,20 @@ def api_bond_list():
         return jsonify({"success": False, "message": "获取列表失败"}), 500
 
     # 返回列表页所需字段
-    want_cols = ["债券代码", "债券简称", "债现价", "正股代码", "正股简称", "正股价", "转股溢价率", "信用评级", "剩余规模", "发行规模", "上市日期", "退市日期", "到期日期", "正股PB", "正股市值", "强赎状态", "回售状态"]
+    want_cols = ["债券代码", "债券简称", "债现价", "正股代码", "正股简称", "正股价", "转股溢价率", "到期收益率", "信用评级", "剩余规模", "发行规模", "上市日期", "退市日期", "到期日期", "正股PB", "正股市值", "强赎状态", "回售状态"]
     cols = [c for c in want_cols if c in df.columns]
     if not cols:
         cols = list(df.columns[:4])
     records = df[cols].to_dict(orient="records")
     # 添加转股价值、双低值、距离强赎线、下修博弈计算
     for row in records:
+        # akshare bond_zh_cov() 对无实时行情的债现价会 fillna(100)，
+        # 表现为「债现价==100 且 正股价缺失(NaN)」。此为占位假值，置为 None。
+        _bp = row.get("债现价")
+        _sp = row.get("正股价")
+        _sp_missing = _sp is None or (isinstance(_sp, float) and math.isnan(_sp))
+        if _bp == 100.0 and _sp_missing:
+            row["债现价"] = None
         stock_price = row.get("正股价")
         conv_price = row.get("转股价")
         if stock_price and conv_price and conv_price > 0:
@@ -711,6 +829,7 @@ def api_bond_list():
                 row[k] = None
         row.setdefault("has_adj_logs", False)
         row.setdefault("付息日列表", [])
+        row.setdefault("到期收益率", None)
 
     # ── 批量写入 DB ───────────────────────────────────────────────────────────
     all_bond_codes = []
