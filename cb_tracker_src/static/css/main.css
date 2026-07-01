@@ -35,6 +35,35 @@ header span {
   opacity: .75;
 }
 
+/* 资产大类切换导航（可转债 / LOF） */
+.asset-nav {
+  margin-left: auto;
+  display: flex;
+  gap: 6px;
+}
+
+.asset-nav-btn {
+  background: rgba(255, 255, 255, .12);
+  color: #fff;
+  border: 1px solid rgba(255, 255, 255, .25);
+  padding: 7px 18px;
+  border-radius: 18px;
+  font-size: 0.9rem;
+  cursor: pointer;
+  transition: background .15s, border-color .15s;
+}
+
+.asset-nav-btn:hover {
+  background: rgba(255, 255, 255, .22);
+}
+
+.asset-nav-btn.active {
+  background: #fff;
+  color: #283593;
+  font-weight: 600;
+  border-color: #fff;
+}
+
 .container {
   max-width: 1280px;
   margin: 24px auto;
@@ -2156,4 +2185,28 @@ tr:hover td {
 
 .neg {
   color: #c62828;
+}
+/* LOF 赎回费分档明细列 */
+.lof-fee-detail-th {
+  text-align: left;
+  min-width: 240px;
+}
+
+.lof-fee-detail {
+  text-align: left;
+  white-space: nowrap;
+  font-size: .8rem;
+}
+
+.lof-fee-seg {
+  display: inline-block;
+}
+
+.lof-fee-seg-days {
+  color: #666;
+}
+
+.lof-fee-sep {
+  color: #ccc;
+  margin: 0 5px;
 }
