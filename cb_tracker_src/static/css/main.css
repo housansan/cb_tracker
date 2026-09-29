@@ -1187,10 +1187,34 @@ tr:hover td {
   border-radius: 6px;
   padding: 7px 10px;
   font-size: .88rem;
+  color: #333;
+  background: #fff;
   outline: none;
   width: 90px;
   transition: border-color .2s;
   -moz-appearance: textfield;
+}
+
+/* 内容区子导航按钮（用于白色背景的 Tab，区别于深色 header 的 asset-nav-btn）*/
+.screener-sub-btn {
+  padding: 5px 18px;
+  background: #f5f5f5;
+  color: #555;
+  border: 1px solid #ddd;
+  border-radius: 16px;
+  font-size: .88rem;
+  cursor: pointer;
+  transition: background .15s, color .15s;
+}
+.screener-sub-btn:hover {
+  background: #e8eaf6;
+  color: #3949ab;
+}
+.screener-sub-btn.active {
+  background: #3949ab;
+  color: #fff;
+  border-color: #3949ab;
+  font-weight: 600;
 }
 
 .price-range-input::-webkit-outer-spin-button,
@@ -1511,6 +1535,51 @@ tr:hover td {
 .premium-tag.neg {
   background: #e8f5e9;
   color: #2e7d32;
+}
+
+/* ── 细选步骤卡片 ────────────────────────────────────────────── */
+.fine-stat-card {
+  background: #f8f9fa;
+  border: 1px solid #e0e0e0;
+  border-radius: 6px;
+  padding: 8px 14px;
+  min-width: 110px;
+  text-align: center;
+}
+.fine-stat-card.fine-stat-highlight {
+  background: #e8f5e9;
+  border-color: #a5d6a7;
+}
+.fine-stat-label { font-size: .75em; color: #888; margin-bottom: 3px; }
+.fine-stat-val   { font-size: 1.2em; font-weight: 600; color: #333; }
+.fine-stat-sub   { font-size: .75em; color: #aaa; margin-top: 2px; }
+.fine-stat-arrow { align-self: center; color: #bbb; font-size: 1.1em; padding: 0 2px; }
+
+/* 策略步骤序号徽章 */
+.strategy-step-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  background: #e8eaf6;
+  color: #3949ab;
+  font-size: .8em;
+  font-weight: 600;
+  flex-shrink: 0;
+}
+
+/* 拖拽排序：被拖动步骤高亮，目标行上边缘指示 */
+.strategy-step-row.dragging {
+  opacity: .5;
+  outline: 2px dashed #3949ab;
+}
+.strategy-step-row.drag-over {
+  border-top: 2px solid #3949ab;
+}
+.drag-handle:hover {
+  color: #3949ab;
 }
 
 .rating-tag {

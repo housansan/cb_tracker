@@ -18,6 +18,7 @@
   <div class="asset-nav">
     <button class="asset-nav-btn active" id="assetNavCb" onclick="switchAsset('cb')">可转债</button>
     <button class="asset-nav-btn" id="assetNavLof" onclick="switchAsset('lof')">LOF基金</button>
+    <button class="asset-nav-btn" id="assetNavScreener" onclick="switchAsset('screener')">选股</button>
   </div>
 </header>
 
@@ -525,6 +526,47 @@
     <div id="lofContent"><div class="list-loading">正在加载 LOF 基金列表...</div></div>
   </div><!-- /lofView -->
 
+  <!-- 选股视图（策略筛选） -->
+  <div id="screenerView" style="display:none">
+    <div class="list-toolbar">
+      <div class="list-toolbar-row list-toolbar-row-search">
+        <h2>策略筛选</h2>
+        <span class="list-count" id="strategyCount"></span>
+        <button class="filter-toggle-btn" id="strategyRunBtn" onclick="runStrategy()">运行策略</button>
+      </div>
+      <!-- 数据状态栏 -->
+      <div class="list-toolbar-row" style="gap:8px;flex-wrap:wrap;align-items:center">
+        <span style="font-size:.85em;color:#888">市场：</span>
+        <button class="quick-filter-btn active" id="strategyMarketA" onclick="setStrategyMarket('a_share')">A股</button>
+        <button class="quick-filter-btn" id="strategyMarketHK" onclick="setStrategyMarket('hk_share')">港股</button>
+        <span style="margin-left:12px;font-size:.85em;color:#888">预设：</span>
+        <select id="strategyPreset" class="price-range-input" style="width:auto;padding:3px 6px" onchange="loadPreset(this.value)">
+          <option value="custom">自定义（空白）</option>
+          <option value="coarse_select">粗选（PE+PB各前100）</option>
+          <option value="value_basic">价值基础版（净资产+PB+PE+行业）</option>
+          <option value="low_pb">低PB策略</option>
+          <option value="low_pe">低PE策略</option>
+          <option value="large_cap_value">大市值低PE</option>
+        </select>
+        <span style="margin-left:auto;display:flex;align-items:center;gap:8px">
+          <span id="dbStatusText" style="font-size:.8em;color:#aaa">加载中...</span>
+          <button class="filter-toggle-btn" id="dbUpdateBtn" onclick="updateData()" style="font-size:.8em;padding:3px 10px">更新数据</button>
+        </span>
+      </div>
+      <div class="filter-hint" style="padding-bottom:6px">
+        <span>💡 四种步骤：<b>范围筛选</b>、<b>排序取前N</b>、<b>行业限制</b>和<b>行业筛选</b>。步骤按顺序执行，排序数量填 0 表示只排序不截断</span>
+      </div>
+      <div id="strategyStepsList" style="margin:4px 0 8px"></div>
+      <div style="display:flex;gap:6px;margin-top:4px">
+        <button class="quick-filter-btn" onclick="addStep('range')">＋ 范围筛选</button>
+        <button class="quick-filter-btn" onclick="addStep('sort_limit')">＋ 排序取前N</button>
+        <button class="quick-filter-btn" onclick="addStep('industry_cap')">＋ 行业限制</button>
+        <button class="quick-filter-btn" onclick="addStep('industry_filter')">＋ 行业筛选</button>
+      </div>
+    </div>
+    <div id="strategyContent"></div>
+  </div><!-- /screenerView -->
+
 </div>
 
 <script src="/static/js/bond-list.js"></script>
@@ -532,6 +574,7 @@
 <script src="/static/js/bond-chart.js"></script>
 <script src="/static/js/bond-table.js"></script>
 <script src="/static/js/lof-list.js"></script>
+<script src="/static/js/stock-strategy.js"></script>
 <script src="/static/js/main.js"></script>
   <!-- 持仓管理弹窗 -->
   <div class="modal-overlay" id="positionModal" style="display:none">
