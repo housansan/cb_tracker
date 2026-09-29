@@ -97,6 +97,34 @@ async function queryData() {
 }
 
 // ── 视图切换 ─────────────────────────────────────────────
+// 资产大类切换：可转债 / LOF
+let _currentAsset = 'cb';
+let _lofLoaded = false;
+
+function switchAsset(asset) {
+  _currentAsset = asset;
+  const cbList = document.getElementById('listView');
+  const cbDetail = document.getElementById('detailView');
+  const lofView = document.getElementById('lofView');
+  const btnCb = document.getElementById('assetNavCb');
+  const btnLof = document.getElementById('assetNavLof');
+
+  if (asset === 'lof') {
+    cbList.style.display = 'none';
+    cbDetail.style.display = 'none';
+    lofView.style.display = 'block';
+    btnCb.classList.remove('active');
+    btnLof.classList.add('active');
+    if (!_lofLoaded) { loadLofList(); _lofLoaded = true; }
+  } else {
+    lofView.style.display = 'none';
+    cbDetail.style.display = 'none';
+    cbList.style.display = 'block';
+    btnLof.classList.remove('active');
+    btnCb.classList.add('active');
+  }
+}
+
 function showListView() {
   document.getElementById('listView').style.display   = 'block';
   document.getElementById('detailView').style.display = 'none';

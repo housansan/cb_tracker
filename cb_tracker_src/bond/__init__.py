@@ -6,6 +6,7 @@ from bond.history import (
     get_bond_adj_logs,
     save_to_csv,
 )
+from bond.lof import get_all_lof_funds
 
 __all__ = [
     "get_convertible_bond_history",
@@ -14,4 +15,5 @@ __all__ = [
     "fetch_bond_detail_only",
     "get_bond_adj_logs",
     "save_to_csv",
+    "get_all_lof_funds",
 ]

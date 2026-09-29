@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from flask import Flask, render_template, request, jsonify
-from bond import get_convertible_bond_history, get_all_convertible_bonds, get_bond_info, fetch_bond_detail_only, get_bond_adj_logs
+from bond import get_convertible_bond_history, get_all_convertible_bonds, get_bond_info, fetch_bond_detail_only, get_bond_adj_logs, get_all_lof_funds
 from bond.db import update_bond_region, query_positions, upsert_position, delete_position, query_alerts, add_alert, delete_alert, query_note, upsert_note, delete_note
 from bond.cache import read_local_cache
 from bond.fetch import fetch_all_cb_remaining
@@ -92,6 +92,10 @@ from bond.db import (
 )
 init_db(DB_CONFIG["dir"])
 init_user_db(USER_DB_CONFIG["dir"])
+
+# LOF 赎回费数据库（独立 lof.db，与转债库分离）
+from bond.lof_db import init_lof_db, query_all_lof_fees, query_existing_lof_codes, upsert_lof_fee, parse_fee_tiers
+init_lof_db(DB_CONFIG["dir"])
 
 # bond_info 缓存有效期（秒）：24 小时
 _BOND_INFO_DB_TTL = 86400
@@ -401,6 +405,156 @@ def _calc_pretax_ytm(bond_price, coupon_pay_dates: list, coupon_rates: list,
 @app.route("/")
 def index():
     return render_template("index.html")
+
+
+# ── LOF 基金列表 ────────────────────────────────────────────────────────────────
+_lof_list_cache = {
+    "data": None,
+    "expire_at": None,
+}
+_LOF_LIST_CACHE_TTL = 3600  # 1 小时（与价格缓存对齐）
+
+# 赎回费后台抓取线程状态（避免重复启动）
+_lof_fee_fetch_state = {"running": False, "done": False}
+
+
+def _fetch_lof_fees_async(codes: list) -> None:
+    """
+    后台线程：逐只拉取 LOF 赎回费率（ak.fund_fee_em）并入库。
+    赎回费是固定数据，只需抓一次；已入库的代码自动跳过（断点续跑）。
+    限速 sleep 防止被限流。
+    """
+    if _lof_fee_fetch_state["running"]:
+        logger.info("[lof_fee] 抓取线程已在运行，跳过")
+        return
+    _lof_fee_fetch_state["running"] = True
+
+    def _run():
+        try:
+            existing = query_existing_lof_codes()
+            todo = [c for c in codes if c not in existing]
+            logger.info("[lof_fee] 开始抓取赎回费，待抓 %d 只（已入库 %d 只）", len(todo), len(existing))
+            filled = 0
+            for code in todo:
+                try:
+                    df = ak.fund_fee_em(symbol=code, indicator="赎回费率")
+                    tiers = parse_fee_tiers(df)
+                    if tiers:
+                        upsert_lof_fee(code, "", tiers)
+                        filled += 1
+                except Exception as _e:
+                    logger.warning("[lof_fee] 抓取失败 code=%s err=%s", code, _e)
+                finally:
+                    time.sleep(BOND_CONFIG.get("fill_details_sleep", 0.5))
+            logger.info("[lof_fee] 赎回费抓取完成，本轮新增 %d 只", filled)
+            _lof_fee_fetch_state["done"] = True
+        finally:
+            _lof_fee_fetch_state["running"] = False
+
+    t = threading.Thread(target=_run, daemon=True)
+    t.start()
+    logger.info("[lof_fee] 已启动赎回费后台抓取线程")
+
+
+def _format_fee_tiers(tiers: list) -> str:
+    """
+    将结构化赎回费分档转为可读文本。
+      [{min_day:0,max_day:7,fee:1.5},{min_day:7,max_day:30,fee:0.5},{min_day:30,max_day:None,fee:0}]
+      → "<7天:1.5% | 7-30天:0.5% | ≥30天:0%"
+    """
+    def _fee_str(f):
+        # 去掉多余小数末尾 0：1.50→1.5，0.00→0
+        s = ("%.2f" % f).rstrip("0").rstrip(".")
+        return f"{s}%"
+
+    parts = []
+    for t in tiers:
+        lo, hi, fee = t.get("min_day"), t.get("max_day"), t.get("fee")
+        if fee is None:
+            continue
+        # 无法量化为天数的档位（如“持有满一个封闭期”）直接用原始期限文本
+        if lo is None and hi is None:
+            label = t.get("term") or "?"
+        elif (lo == 0 or lo is None) and hi:
+            label = f"<{hi}天"
+        elif hi is None:
+            label = f"≥{lo}天"
+        else:
+            label = f"{lo}-{hi}天"
+        parts.append(f"{label}:{_fee_str(fee)}")
+    return " | ".join(parts)
+
+
+@app.route("/api/lof_list")
+def api_lof_list():
+    """
+    获取全市场 LOF 基金列表（含溢价率/折价率、成交额、申赎状态、赎回费）。
+    策略：内存缓存 1 小时 → 实时拉取行情 + JOIN 本地赎回费库。
+    赎回费缺失时后台线程自动抓取入库（首次不全，后续刷新即补上）。
+    """
+    now = datetime.now()
+    if _lof_list_cache["data"] is not None and _lof_list_cache["expire_at"] > now:
+        logger.info("[/api/lof_list] 命中内存缓存，返回 %d 只 LOF", len(_lof_list_cache["data"]))
+        return jsonify({"success": True, "data": _lof_list_cache["data"], "from_cache": True})
+
+    logger.info("[/api/lof_list] 缓存未命中，实时拉取 LOF 数据")
+    records = get_all_lof_funds()
+    if not records:
+        logger.error("[/api/lof_list] 获取 LOF 数据失败")
+        return jsonify({"success": False, "message": "获取 LOF 数据失败"}), 500
+
+    # ── JOIN 本地赎回费数据 ────────────────────────────────────────────────────
+    try:
+        fee_map = query_all_lof_fees()
+    except Exception as _e:
+        logger.warning("[/api/lof_list] 读取赎回费库失败 err=%s", _e)
+        fee_map = {}
+
+    missing_fee_codes = []
+    for row in records:
+        code = row.get("代码", "")
+        fee = fee_map.get(code)
+        if fee:
+            row["免赎费天数"] = fee.get("free_days")
+            row["赎回费短线"] = fee.get("short_fee")
+            tiers = fee.get("fee_tiers") or []
+            row["赎回费分档"] = tiers                       # 结构化分档，供前端展开
+            row["赎回费详情"] = _format_fee_tiers(tiers)     # 可读文本，如 "<7天:1.5% | 7-30天:0.5% | ≥30天:0%"
+            # 净折价 = |折价率| − 短线赎回费（折价套利真实空间；折价率为负值）
+            pr = row.get("溢价率")
+            short_fee = fee.get("short_fee")
+            if pr is not None and pr < 0 and short_fee is not None:
+                row["净折价"] = round(abs(pr) - short_fee, 3)
+            else:
+                row["净折价"] = None
+        else:
+            row["免赎费天数"] = None
+            row["赎回费短线"] = None
+            row["赎回费分档"] = []
+            row["赎回费详情"] = ""
+            row["净折价"] = None
+            if row.get("价格来源") != "无行情":
+                missing_fee_codes.append(code)
+
+    # 赎回费缺失的，后台异步抓取入库
+    if missing_fee_codes:
+        _fetch_lof_fees_async(missing_fee_codes)
+
+    # 清理 NaN / Inf，避免 JSON 序列化失败
+    for row in records:
+        for k, v in row.items():
+            if isinstance(v, float) and (math.isnan(v) or math.isinf(v)):
+                row[k] = None
+
+    _lof_list_cache["data"] = records
+    _lof_list_cache["expire_at"] = now + timedelta(seconds=_LOF_LIST_CACHE_TTL)
+    logger.info("[/api/lof_list] 返回 %d 只 LOF（%d 只待补赎回费），已写入内存缓存",
+                len(records), len(missing_fee_codes))
+    return jsonify({
+        "success": True,
+        "data": records,
+        "pending_fee": len(missing_fee_codes) > 0,  # 前端据此决定是否延迟刷新
+    })
 
 
 @app.route("/api/history")
