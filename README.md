@@ -1,6 +1,6 @@
-# 可转债历史数据查询工具
+# 可转债、LOF 与股票策略筛选工具
 
-基于 Flask + AKShare 构建的可转债历史数据查询 Web 应用，支持查看 K 线走势、价值分析、转股价调整记录等信息。
+基于 Flask + AKShare 构建的本地投资研究 Web 应用，支持可转债分析、LOF 折溢价观察，以及 A 股/港股策略筛选。
 
 ## 功能特性
 
@@ -8,28 +8,31 @@
 - �📈 查询可转债历史成交数据（价格、成交量、溢价率、正股收盘价、到期收益率等）
 - 🔍 查询可转债基础信息（上市/退市日期、转股价、付息结构等）
 - 📋 查询转股价格调整记录
+- 💰 查看 LOF 市价、净值、折溢价、申赎状态与赎回费
+- 🔎 使用 PE、PB、市值、净资产和行业条件筛选 A 股/港股
+- 🧩 自由组合范围筛选、排序取前 N、行业限制和行业筛选步骤
+- 💾 使用 SQLite 缓存选股数据，运行策略时无需重复请求行情接口
 - ⚡ 多级缓存（内存缓存 + 本地文件缓存），避免重复请求
 
 ## 目录结构
 
 ```
-fund/
-├── app.py                  # Flask 应用入口，定义 API 路由
-├── bond_history.py         # 核心数据获取与缓存逻辑
-├── requirements.txt        # Python 依赖
-├── app.log                 # 运行日志
-├── templates/
-│   └── index.html          # 前端页面
-└── data/                   # 数据目录
-    ├── bond_cache/         # 本地文件缓存（按类型分子目录）
-    │   ├── kline/          # K 线全量历史（hist_full_*.json）
-    │   ├── merged/         # 合并后完整历史（full_hist_*.json）
-    │   ├── cov_value/      # 价值分析数据（cov_value_*.json）
-    │   ├── iss_amt/        # 剩余规模历史（iss_amt_hist_*.json）
-    │   ├── adj_logs/       # 转股价调整记录（adj_logs_*.json）
-    │   └── misc/           # 其他缓存
-    └── exports/            # 手动导出的历史数据文件
-        └── *.csv           # 按债券代码命名，如 bond_113050_history.csv
+cb_tracker/
+├── conf/config.toml              # 日志、缓存、数据库和网络配置
+├── cb_tracker_src/
+│   ├── app.py                    # Flask 应用与 API 路由
+│   ├── config.py                 # 配置加载
+│   ├── requirements.txt          # Python 依赖
+│   ├── bond/
+│   │   ├── history.py            # 可转债历史数据
+│   │   ├── lof.py                # LOF 数据与折溢价计算
+│   │   ├── stock_screener.py     # 股票数据更新与策略执行
+│   │   └── screener_db.py        # 选股 SQLite 缓存
+│   ├── templates/index.html      # 页面结构
+│   └── static/                   # 样式与前端脚本
+├── data/                         # SQLite 数据库（运行时生成）
+├── cache/                        # 文件缓存（运行时生成）
+└── exports/                      # 导出文件（运行时生成）
 ```
 
 ## 安装与运行
@@ -37,16 +40,18 @@ fund/
 ### 1. 安装依赖
 
 ```bash
-pip install -r requirements.txt
+python3 -m pip install -r cb_tracker_src/requirements.txt
 ```
 
 ### 2. 启动服务
 
 ```bash
-python app.py
+python3 cb_tracker_src/app.py
 ```
 
 服务默认运行在 `http://localhost:5000`。
+
+首次进入“选股”页面且本地数据库为空时，应用会在后台初始化 A 股和港股数据。后续可通过页面上的“更新数据”按钮手动刷新。
 
 ## API 接口
 
@@ -92,6 +97,27 @@ GET /api/bond_info?bond_code=113050
 GET /api/bond_adj_logs?bond_code=127099
 ```
 
+### 执行股票筛选策略
+
+```http
+POST /api/stock_screener/strategy
+Content-Type: application/json
+
+{
+  "market": "a_share",
+  "steps": [
+    {"type": "range", "field": "net_assets", "op": ">=", "value": 100},
+    {"type": "sort_limit", "field": "pe", "dir": "asc", "limit": 30}
+  ]
+}
+```
+
+辅助接口：
+
+- `GET /api/stock_screener/db_status`：查看本地数据状态
+- `POST /api/stock_screener/update`：后台更新 A 股/港股数据
+- `GET /api/stock_screener/industries?market=a_share`：读取本地行业列表
+
 ## 缓存说明
 
 数据采用两级缓存策略：
@@ -110,6 +136,7 @@ GET /api/bond_adj_logs?bond_code=127099
 | [AKShare](https://akshare.akfamily.xyz/) | `>=1.12.0` | 可转债数据源 |
 | [pandas](https://pandas.pydata.org/) | `>=2.0.0` | 数据处理 |
 | [Flask](https://flask.palletsprojects.com/) | 最新 | Web 框架 |
+| tomli | Python < 3.11 | 读取 TOML 配置；Python 3.11+ 使用内置 `tomllib` |
 
 ## 数据库
 

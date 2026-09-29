@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from flask import Flask, render_template, request, jsonify
-from bond import get_convertible_bond_history, get_all_convertible_bonds, get_bond_info, fetch_bond_detail_only, get_bond_adj_logs, get_all_lof_funds
+from bond import get_convertible_bond_history, get_all_convertible_bonds, get_bond_info, fetch_bond_detail_only, get_bond_adj_logs, get_all_lof_funds, execute_strategy, update_market_data
 from bond.db import update_bond_region, query_positions, upsert_position, delete_position, query_alerts, add_alert, delete_alert, query_note, upsert_note, delete_note
 from bond.cache import read_local_cache
 from bond.fetch import fetch_all_cb_remaining
@@ -97,6 +97,10 @@ init_user_db(USER_DB_CONFIG["dir"])
 from bond.lof_db import init_lof_db, query_all_lof_fees, query_existing_lof_codes, upsert_lof_fee, parse_fee_tiers
 init_lof_db(DB_CONFIG["dir"])
 
+# 选股缓存数据库（独立 screener.db）
+from bond.screener_db import init_screener_db, get_all_stocks, get_industries, get_meta as get_screener_meta
+init_screener_db(DB_CONFIG["dir"])
+
 # bond_info 缓存有效期（秒）：24 小时
 _BOND_INFO_DB_TTL = 86400
 # bond_list DB 缓存有效期（秒）：7 天（基础信息变化慢，价格走独立实时接口）
@@ -105,6 +109,37 @@ _BOND_LIST_DB_TTL = 86400 * 7
 logger = logging.getLogger("app")
 
 app = Flask(__name__)
+
+# ── 首次启动自动更新选股数据 ─────────────────────────────────────────────────────
+_screener_update_running = False  # 全局更新状态标记
+
+def _trigger_screener_update(market: str = "both") -> None:
+    global _screener_update_running
+    if _screener_update_running:
+        logger.info("[startup] 选股更新已在运行，跳过")
+        return
+    _screener_update_running = True
+
+    def _do():
+        global _screener_update_running
+        try:
+            update_market_data(market)
+        except Exception as e:
+            logger.error("[screener_auto_update] 失败：%s", e)
+        finally:
+            _screener_update_running = False
+
+    threading.Thread(target=_do, daemon=True).start()
+
+
+# 首次启动：DB 为空时自动后台初始化
+_a_empty  = get_screener_meta("a_share")["stock_count"] == 0
+_hk_empty = get_screener_meta("hk_share")["stock_count"] == 0
+if _a_empty or _hk_empty:
+    _need_mkt = "both" if (_a_empty and _hk_empty) else ("a_share" if _a_empty else "hk_share")
+    logger.info("[startup] 选股 DB 为空（%s），开始自动后台初始化...", _need_mkt)
+    _trigger_screener_update(_need_mkt)
+
 
 # ── 后台补全详细字段 ──────────────────────────────────────────────────────────
 
@@ -405,6 +440,103 @@ def _calc_pretax_ytm(bond_price, coupon_pay_dates: list, coupon_rates: list,
 @app.route("/")
 def index():
     return render_template("index.html")
+
+
+@app.route("/stock_screener")
+def stock_screener_page():
+    return render_template("index.html")
+
+
+# ── 选股策略筛选 ────────────────────────────────────────────────────────────────
+
+@app.route("/api/stock_screener/db_status")
+def api_screener_db_status():
+    """返回 A股 / 港股的数据库状态（更新时间、股票数量、是否正在更新）"""
+    return jsonify({
+        "success":  True,
+        "a_share":  get_screener_meta("a_share"),
+        "hk_share": get_screener_meta("hk_share"),
+        "updating": _screener_update_running,
+    })
+
+
+@app.route("/api/stock_screener/update", methods=["POST"])
+def api_screener_update():
+    """手动触发选股数据更新（后台线程执行，立即返回）"""
+    body   = request.get_json(silent=True) or {}
+    market = body.get("market", "both")
+    if market not in ("a_share", "hk_share", "both"):
+        return jsonify({"success": False, "message": "market 可选 a_share / hk_share / both"}), 400
+    _trigger_screener_update(market)
+    return jsonify({"success": True, "message": f"正在后台更新 {market}，请轮询 /api/stock_screener/db_status"})
+
+
+@app.route("/api/stock_screener/strategy", methods=["POST"])
+def api_stock_screener_strategy():
+    """
+    通用策略执行器：从 DB 读取全量股票，执行步骤列表，返回筛选结果。
+    """
+    body   = request.get_json(silent=True) or {}
+    market = body.get("market", "a_share")
+    steps  = body.get("steps",  [])
+
+    if market not in ("a_share", "hk_share"):
+        return jsonify({"success": False, "message": "market 仅支持 a_share 或 hk_share"}), 400
+
+    raw_stocks = get_all_stocks(market)
+    meta       = get_screener_meta(market)
+
+    if not raw_stocks:
+        return jsonify({
+            "success":    False,
+            "need_update": True,
+            "updating":   _screener_update_running,
+            "message":    "数据正在初始化，请稍候..." if _screener_update_running else "暂无数据",
+        })
+
+    try:
+        result = execute_strategy(raw_stocks, steps, market=market)
+    except Exception as e:
+        logger.error("[/api/stock_screener/strategy] 策略执行失败 %s", e)
+        return jsonify({"success": False, "message": f"策略执行失败：{e}"}), 500
+
+    for row in result["stocks"]:
+        for k, v in row.items():
+            if isinstance(v, float) and (math.isnan(v) or math.isinf(v)):
+                row[k] = None
+
+    return jsonify({
+        "success":        True,
+        "market":         market,
+        "data":           result["stocks"],
+        "stats":          result["stats"],
+        "db_update_time": meta.get("last_update"),
+        "total_stocks":   meta.get("stock_count", 0),
+    })
+
+
+@app.route("/api/stock_screener/industries")
+def api_screener_industries():
+    """从本地选股数据库返回行业分类列表。"""
+    market = request.args.get("market", "a_share")
+    if market not in ("a_share", "hk_share"):
+        return jsonify({"success": False, "message": "market 仅支持 a_share 或 hk_share"}), 400
+
+    try:
+        industries = get_industries(market)
+        if not industries:
+            meta = get_screener_meta(market)
+            message = "行业数据正在初始化，请稍候" if meta.get("updating") else "暂无行业数据，请先更新选股数据"
+            return jsonify({
+                "success": False,
+                "need_update": not meta.get("updating"),
+                "updating": bool(meta.get("updating")),
+                "message": message,
+            }), 503
+        return jsonify({"success": True, "data": industries, "source": "database"})
+    except Exception as e:
+        logger.error("[/api/stock_screener/industries] 失败 %s", e)
+        return jsonify({"success": False, "message": "读取行业数据失败"}), 500
 
 
 # ── LOF 基金列表 ────────────────────────────────────────────────────────────────

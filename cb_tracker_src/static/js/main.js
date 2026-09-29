@@ -97,30 +97,45 @@ async function queryData() {
 }
 
 // ── 视图切换 ─────────────────────────────────────────────
-// 资产大类切换：可转债 / LOF
+// 资产大类切换：可转债 / LOF / 选股
 let _currentAsset = 'cb';
 let _lofLoaded = false;
+let _screenerLoaded = false;
 
 function switchAsset(asset) {
   _currentAsset = asset;
   const cbList = document.getElementById('listView');
   const cbDetail = document.getElementById('detailView');
   const lofView = document.getElementById('lofView');
+  const screenerView = document.getElementById('screenerView');
   const btnCb = document.getElementById('assetNavCb');
   const btnLof = document.getElementById('assetNavLof');
+  const btnScreener = document.getElementById('assetNavScreener');
+
+  // 全部隐藏
+  cbList.style.display = 'none';
+  cbDetail.style.display = 'none';
+  lofView.style.display = 'none';
+  screenerView.style.display = 'none';
+  btnCb.classList.remove('active');
+  btnLof.classList.remove('active');
+  btnScreener.classList.remove('active');
 
   if (asset === 'lof') {
-    cbList.style.display = 'none';
-    cbDetail.style.display = 'none';
     lofView.style.display = 'block';
-    btnCb.classList.remove('active');
     btnLof.classList.add('active');
     if (!_lofLoaded) { loadLofList(); _lofLoaded = true; }
+  } else if (asset === 'screener') {
+    screenerView.style.display = 'block';
+    btnScreener.classList.add('active');
+    if (!_screenerLoaded) {
+      loadDbStatus();
+      if (typeof initStrategyView === 'function') initStrategyView();
+      else renderStrategySteps();
+      _screenerLoaded = true;
+    }
   } else {
-    lofView.style.display = 'none';
-    cbDetail.style.display = 'none';
     cbList.style.display = 'block';
-    btnLof.classList.remove('active');
     btnCb.classList.add('active');
   }
 }
